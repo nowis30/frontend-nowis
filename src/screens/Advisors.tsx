@@ -118,6 +118,19 @@ const PRIORITY_QUESTION_IDS = [
   'legalConcern'
 ] as const;
 
+const QUESTION_DOCUMENT_HINTS: Partial<Record<typeof PRIORITY_QUESTION_IDS[number], string>> = {
+  assetProfile:
+    'Organigramme ou note résumant votre structure (ex: société opérante, immeubles locatifs, holdings).',
+  taxableIncome:
+    'Projection ou état financier indiquant le revenu imposable prévu pour l’exercice en cours.',
+  profitMargin: 'Rapport financier ou bilan synthèse montrant la marge bénéficiaire récente.',
+  province: "Lettre patente ou document d’immatriculation confirmant la province principale.",
+  holdingStructure: 'Organigramme montrant la présence (ou non) d’une société de gestion.',
+  dividendIntent: 'Procès-verbal ou plan de distribution confirmant les dividendes prévus.',
+  liquidityGoal: 'Plan de trésorerie, budget de liquidités ou projection d’investissements.',
+  legalConcern: 'Note interne ou correspondance décrivant les enjeux juridiques actuels.'
+};
+
 function isUnauthorizedError(error: unknown): boolean {
   return axios.isAxiosError(error) && error.response?.status === 401;
 }
@@ -197,13 +210,23 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
 
   function buildInitialInterviewPrompt(): string {
     const listText = priorityQuestions.length ? formatPriorityList(priorityQuestions) : '';
+    const documentHints = priorityQuestions
+      .map((question) => QUESTION_DOCUMENT_HINTS[question.id as typeof PRIORITY_QUESTION_IDS[number]])
+      .filter((hint): hint is string => Boolean(hint));
     const instructions = [
       "Objectif: entretien rapide pour collecter les informations essentielles du dossier immobilier.",
       listText
         ? `Questions prioritaires à poser dans l'ordre:\n${listText}`
         : 'Pose uniquement les questions critiques (profil, revenus, fiscalité, objectifs) et rien de plus.',
-      'Pose une seule question concise à la fois et attends ma réponse avant de poursuivre.'
+      'Pose une seule question concise à la fois et attends ma réponse avant de poursuivre.',
+      'Quand une preuve ou un justificatif serait utile, demande explicitement le document au client (ex: « Pouvez-vous ajouter votre relevé X ? ») et rappelle où l’ajouter.'
     ];
+    if (documentHints.length) {
+      instructions.push(
+        'Documents de référence à demander si nécessaire:',
+        documentHints.map((hint, index) => `${index + 1}. ${hint}`).join('\n')
+      );
+    }
     return instructions.join('\n');
   }
 
@@ -222,10 +245,27 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       ? `Questions prioritaires restantes:\n${formatPriorityList(remaining)}`
       : 'Toutes les questions prioritaires ont été couvertes. Fournis un bref récapitulatif et les prochaines étapes.';
     const questionLabel = question?.label ?? 'la question précédente';
+    const currentDocHint = question
+      ? QUESTION_DOCUMENT_HINTS[question.id as typeof PRIORITY_QUESTION_IDS[number]]
+      : undefined;
+    const remainingDocHints = remaining
+      .map((item) => QUESTION_DOCUMENT_HINTS[item.id as typeof PRIORITY_QUESTION_IDS[number]])
+      .filter((hint): hint is string => Boolean(hint));
+    const documentsGuidance = [
+      currentDocHint
+        ? `Document recommandé pour "${questionLabel}": ${currentDocHint}. Demande-le si ce n’est pas déjà fourni.`
+        : null,
+      remainingDocHints.length
+        ? `Documents à récupérer prochainement:\n${remainingDocHints.map((hint) => `- ${hint}`).join('\n')}`
+        : null
+    ]
+      .filter(Boolean)
+      .join('\n');
     return [
       'Rappel: entretien accéléré, limite-toi aux informations clés.',
       remainingText,
       `Réponse fournie pour "${questionLabel}": ${answerLabel} (valeur brute: ${answerValue}).`,
+      documentsGuidance,
       remaining.length
         ? 'Passe immédiatement à la prochaine question prioritaire restante.'
         : 'Conclue avec un résumé clair et les actions à prioriser.'
