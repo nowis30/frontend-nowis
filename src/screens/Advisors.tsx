@@ -12,6 +12,8 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  IconButton,
+  InputAdornment,
   List,
   ListItem,
   ListItemIcon,
@@ -20,12 +22,14 @@ import {
   Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography
 } from '@mui/material';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import QuestionAnswerIcon from '@mui/icons-material/QuestionAnswer';
 import TipsAndUpdatesIcon from '@mui/icons-material/TipsAndUpdates';
 import TaskAltIcon from '@mui/icons-material/TaskAlt';
+import KeyboardVoiceIcon from '@mui/icons-material/KeyboardVoice';
 
 import {
   AdvisorAnswer,
@@ -62,6 +66,28 @@ interface TargetedExchange {
 interface AdvisorsScreenProps {
   onUnauthorized?: () => void;
 }
+
+type BrowserSpeechRecognition = {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type BrowserSpeechRecognitionEvent = {
+  results: ArrayLike<{
+    isFinal: boolean;
+    [index: number]: { transcript: string };
+  }>;
+};
+
+type BrowserSpeechRecognitionErrorEvent = {
+  error: string;
+};
 
 const expertLabels: Record<string, string> = {
   fiscaliste: 'Fiscaliste',
@@ -109,6 +135,11 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [targetError, setTargetError] = useState<string | null>(null);
   const [targetLoading, setTargetLoading] = useState(false);
   const [targetHistory, setTargetHistory] = useState<TargetedExchange[]>([]);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const [speechActiveField, setSpeechActiveField] = useState<'main' | 'target' | null>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
   const askedQuestionsRef = useRef(new Set<string>());
 
@@ -148,6 +179,23 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
 
     bootstrap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const recognitionClass = (window as typeof window & {
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+    }).SpeechRecognition ??
+      (window as typeof window & { webkitSpeechRecognition?: new () => BrowserSpeechRecognition })
+        .webkitSpeechRecognition;
+    setSpeechSupported(Boolean(recognitionClass));
+
+    return () => {
+      recognitionRef.current?.stop();
+    };
   }, []);
 
   useEffect(() => {
@@ -221,6 +269,96 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       setSubmitting(false);
       setInputValue('');
     }
+  }
+
+  function stopSpeechCapture() {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (err) {
+        console.warn('Speech recognition already stopped', err);
+      }
+      recognitionRef.current = null;
+    }
+    setListening(false);
+    setSpeechActiveField(null);
+  }
+
+  function startSpeechCapture(field: 'main' | 'target') {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const recognitionCtor =
+      (window as typeof window & {
+        SpeechRecognition?: new () => BrowserSpeechRecognition;
+        webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+      }).SpeechRecognition ??
+      (window as typeof window & { webkitSpeechRecognition?: new () => BrowserSpeechRecognition })
+        .webkitSpeechRecognition;
+
+    if (!recognitionCtor) {
+      setSpeechError('La saisie vocale n’est pas prise en charge sur ce navigateur.');
+      return;
+    }
+
+    stopSpeechCapture();
+
+    try {
+      const recognition = new recognitionCtor();
+      recognition.lang = 'fr-FR';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
+        const transcript = event.results?.[0]?.[0]?.transcript ?? '';
+        if (!transcript) {
+          return;
+        }
+        if (field === 'main') {
+          setInputValue((previous) => (previous ? `${previous} ${transcript}` : transcript));
+        } else {
+          setTargetQuestion((previous) => (previous ? `${previous} ${transcript}` : transcript));
+        }
+      };
+
+      recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
+        let message = "Erreur lors de la saisie vocale.";
+        if (event.error === 'not-allowed') {
+          message = 'Accès au micro refusé. Vérifiez les permissions du navigateur.';
+        } else if (event.error === 'no-speech') {
+          message = 'Aucune voix détectée. Réessayez après avoir parlé clairement.';
+        }
+        setSpeechError(message);
+      };
+
+      recognition.onend = () => {
+        stopSpeechCapture();
+      };
+
+      recognitionRef.current = recognition;
+      setSpeechActiveField(field);
+      setSpeechError(null);
+      setListening(true);
+      recognition.start();
+    } catch (err) {
+      console.error('Speech recognition init failed', err);
+      setSpeechError("Impossible de démarrer la saisie vocale.");
+      stopSpeechCapture();
+    }
+  }
+
+  function handleSpeechToggle(field: 'main' | 'target') {
+    if (!speechSupported) {
+      setSpeechError('La saisie vocale n’est pas prise en charge sur ce navigateur.');
+      return;
+    }
+
+    if (listening && speechActiveField === field) {
+      stopSpeechCapture();
+      return;
+    }
+
+    startSpeechCapture(field);
   }
 
   async function handleTargetedAsk(event: React.FormEvent<HTMLFormElement>) {
@@ -324,17 +462,22 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
 
       {error && <Alert severity="error">{error}</Alert>}
 
-      {uncertainty.length > 0 && (
+      {(uncertainty.length > 0 || speechError) && (
         <Alert severity="warning" variant="outlined">
           <Stack spacing={1}>
-            <Typography variant="body2">
-              Certaines réponses sont à confirmer. Vous pourrez préciser ces points plus tard :
-            </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {uncertainty.map((field) => (
-                <Chip key={field.questionId} label={field.label} color="warning" variant="outlined" size="small" />
-              ))}
-            </Stack>
+            {uncertainty.length > 0 && (
+              <>
+                <Typography variant="body2">
+                  Certaines réponses sont à confirmer. Vous pourrez préciser ces points plus tard :
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  {uncertainty.map((field) => (
+                    <Chip key={field.questionId} label={field.label} color="warning" variant="outlined" size="small" />
+                  ))}
+                </Stack>
+              </>
+            )}
+            {speechError && <Typography variant="body2">{speechError}</Typography>}
           </Stack>
         </Alert>
       )}
@@ -456,6 +599,35 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
                       fullWidth
                       helperText={helperText}
                       error={Boolean(formError)}
+                      InputProps={
+                        speechSupported
+                          ? {
+                              endAdornment: (
+                                <InputAdornment position="end">
+                                  <Tooltip
+                                    title={
+                                      listening && speechActiveField === 'main'
+                                        ? 'Arrêter la dictée'
+                                        : 'Dicter au micro'
+                                    }
+                                  >
+                                    <span>
+                                      <IconButton
+                                        onClick={() => handleSpeechToggle('main')}
+                                        color={listening && speechActiveField === 'main' ? 'primary' : 'default'}
+                                        aria-label="Saisie vocale pour la réponse"
+                                        size="small"
+                                        disabled={submitting}
+                                      >
+                                        <KeyboardVoiceIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </InputAdornment>
+                              )
+                            }
+                          : undefined
+                      }
                     />
                   );
                 })()
@@ -503,6 +675,35 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
               required
               fullWidth
               helperText="Precisez le contexte ou la decision a clarifier."
+              InputProps={
+                speechSupported
+                  ? {
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Tooltip
+                            title={
+                              listening && speechActiveField === 'target'
+                                ? 'Arrêter la dictée'
+                                : 'Dicter au micro'
+                            }
+                          >
+                            <span>
+                              <IconButton
+                                onClick={() => handleSpeechToggle('target')}
+                                color={listening && speechActiveField === 'target' ? 'primary' : 'default'}
+                                aria-label="Saisie vocale pour la question ciblee"
+                                size="small"
+                                disabled={targetLoading}
+                              >
+                                <KeyboardVoiceIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </InputAdornment>
+                      )
+                    }
+                  : undefined
+              }
             />
             <Stack direction="row" spacing={2}>
               <Button type="submit" variant="contained" disabled={targetLoading} startIcon={<QuestionAnswerIcon />}>
