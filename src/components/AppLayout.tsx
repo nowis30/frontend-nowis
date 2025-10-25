@@ -5,6 +5,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 const links = [
   { to: '/dashboard', label: 'Tableau de bord' },
   { to: '/reports', label: 'Rapports' },
+  { to: '/advisors', label: 'Conseillers IA' },
   { to: '/companies', label: 'Entreprises' },
   { to: '/properties', label: 'Immeubles' },
   { to: '/revenues', label: 'Revenus' },

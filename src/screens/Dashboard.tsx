@@ -97,6 +97,14 @@ function DashboardScreen() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4">Tableau de bord consolidé</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            color="secondary"
+            onClick={() => navigate('/advisors')}
+            aria-label="Ouvrir les Conseillers IA"
+          >
+            Conseillers IA
+          </Button>
           <Button variant="outlined" onClick={handleExportCsv} disabled={exportingCsv || exportingPdf}>
             {exportingCsv ? 'Export...' : 'Exporter CSV'}
           </Button>

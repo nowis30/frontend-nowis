@@ -1,6 +1,7 @@
 import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios';
 
 import { useAuthStore } from '../store/authStore';
+import { getAdvisorPortalKey } from '../utils/advisorPortalKey';
 
 // Détermine la base API : priorité à l'env, sinon Render en prod, sinon proxy local.
 const envBaseUrl =
@@ -14,12 +15,26 @@ export const apiClient = axios.create({
   baseURL: resolvedBaseUrl ? `${resolvedBaseUrl}/api` : '/api'
 });
 
-apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = useAuthStore.getState().token;
-  if (token) {
-    const headers = AxiosHeaders.from(config.headers ?? {});
-    headers.set('Authorization', `Bearer ${token}`);
-    config.headers = headers;
+function isAdvisorPortalRoute(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
   }
+  return window.location.pathname.startsWith('/advisor-portal');
+}
+
+apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const headers = AxiosHeaders.from(config.headers ?? {});
+  const token = useAuthStore.getState().token;
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  } else if (isAdvisorPortalRoute()) {
+    const portalKey = getAdvisorPortalKey();
+    if (portalKey) {
+      headers.set('X-Advisor-Portal-Key', portalKey);
+    }
+  }
+
+  config.headers = headers;
   return config;
 });
