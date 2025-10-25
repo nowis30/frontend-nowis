@@ -100,6 +100,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
         : 'Mode GPT'
       : 'IA heuristique'
     : null;
+  const uncertainty = result?.uncertainty ?? [];
 
   useEffect(() => {
     async function bootstrap() {
@@ -234,6 +235,21 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
 
       {error && <Alert severity="error">{error}</Alert>}
 
+      {uncertainty.length > 0 && (
+        <Alert severity="warning" variant="outlined">
+          <Stack spacing={1}>
+            <Typography variant="body2">
+              Certaines réponses sont à confirmer. Vous pourrez préciser ces points plus tard :
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {uncertainty.map((field) => (
+                <Chip key={field.questionId} label={field.label} color="warning" variant="outlined" size="small" />
+              ))}
+            </Stack>
+          </Stack>
+        </Alert>
+      )}
+
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} alignItems="stretch">
         <Paper elevation={3} sx={{ flex: 1, p: 3, maxHeight: 480, overflowY: 'auto' }}>
           <Stack spacing={2}>
@@ -319,11 +335,19 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
               ) : (
                 (() => {
                   const isNumberQuestion = currentQuestionDefinition.type === 'number';
-                  const helperText =
+                  const questionUncertainty = uncertainty.find(
+                    (field) => field.questionId === currentQuestionDefinition.id
+                  );
+                  let helperText =
                     formError ??
                     (isNumberQuestion
                       ? "Inscrivez un montant estimé (ex. 250000) ou tapez 'je ne sais pas'."
                       : currentQuestionDefinition.description);
+                  if (!formError && questionUncertainty) {
+                    helperText = helperText
+                      ? `${helperText} | Réponse actuelle à confirmer : vous pourrez préciser ce point plus tard.`
+                      : 'Réponse actuelle à confirmer : vous pourrez préciser ce point plus tard.';
+                  }
                   return (
                     <TextField
                       label="Votre réponse"

@@ -43,6 +43,12 @@ export interface AdvisorResultEngine {
   note?: string;
 }
 
+export interface AdvisorUncertaintyField {
+  questionId: string;
+  label: string;
+  description?: string;
+}
+
 export interface AdvisorResult {
   nextQuestion: AdvisorQuestion | null;
   completed: boolean;
@@ -50,6 +56,7 @@ export interface AdvisorResult {
   recommendations: AdvisorRecommendation[];
   metrics: AdvisorMetric[];
   followUps: string[];
+  uncertainty: AdvisorUncertaintyField[];
   engine: AdvisorResultEngine;
 }
 
