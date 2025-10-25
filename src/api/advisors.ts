@@ -38,6 +38,7 @@ export interface AdvisorRecommendation {
 export type AdvisorEngineMode = 'heuristic' | 'gpt';
 
 export type AdvisorResponderId = 'fiscaliste' | 'comptable' | 'planificateur' | 'avocat' | 'group';
+export type AdvisorInterviewerId = Exclude<AdvisorResponderId, 'group'>;
 
 export interface AdvisorResultEngine {
   mode: AdvisorEngineMode;
@@ -74,6 +75,20 @@ export interface AdvisorResult {
   engine: AdvisorResultEngine;
 }
 
+export interface AdvisorConvoNextQuestion {
+  id: string;
+  label: string;
+  type: 'text' | 'number' | 'select';
+  options?: Array<{ value: string; label: string }>;
+  placeholder?: string;
+}
+
+export interface AdvisorConvoStep {
+  completed: boolean;
+  message: string;
+  nextQuestion: AdvisorConvoNextQuestion | null;
+}
+
 export async function fetchAdvisorQuestions(): Promise<AdvisorQuestion[]> {
   const response = await apiClient.get<{ questions: AdvisorQuestion[] }>('/advisors/questions');
   return response.data.questions;
@@ -103,5 +118,16 @@ export interface AskAdvisorPayload {
 
 export async function askAdvisorQuestion(payload: AskAdvisorPayload): Promise<AdvisorTargetedAnswer> {
   const response = await apiClient.post<AdvisorTargetedAnswer>('/advisors/ask', payload);
+  return response.data;
+}
+
+export interface AdvisorConvoPayload {
+  expertId: AdvisorInterviewerId;
+  message: string;
+  snapshot?: unknown;
+}
+
+export async function postAdvisorConversation(payload: AdvisorConvoPayload): Promise<AdvisorConvoStep> {
+  const response = await apiClient.post<AdvisorConvoStep>('/advisors/convo', payload);
   return response.data;
 }

@@ -34,11 +34,15 @@ import KeyboardVoiceIcon from '@mui/icons-material/KeyboardVoice';
 import {
   AdvisorAnswer,
   AdvisorEngineMode,
+  AdvisorConvoNextQuestion,
+  AdvisorConvoStep,
+  AdvisorInterviewerId,
   AdvisorMetric,
   AdvisorQuestion,
   AdvisorResult,
   AdvisorResponderId,
   askAdvisorQuestion,
+  postAdvisorConversation,
   evaluateAdvisors,
   fetchAdvisorQuestions
 } from '../api/advisors';
@@ -61,6 +65,12 @@ interface TargetedExchange {
   metrics: AdvisorMetric[];
   engineMode: AdvisorEngineMode;
   engineNote?: string;
+}
+
+interface InterviewMessage {
+  id: string;
+  role: 'assistant' | 'user';
+  content: string;
 }
 
 interface AdvisorsScreenProps {
@@ -139,6 +149,15 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
   const [speechActiveField, setSpeechActiveField] = useState<'main' | 'target' | null>(null);
+  const [interviewOpen, setInterviewOpen] = useState(false);
+  const [interviewExpert, setInterviewExpert] = useState<AdvisorInterviewerId>('fiscaliste');
+  const [interviewMessages, setInterviewMessages] = useState<InterviewMessage[]>([]);
+  const [interviewStarted, setInterviewStarted] = useState(false);
+  const [interviewLoading, setInterviewLoading] = useState(false);
+  const [interviewCompleted, setInterviewCompleted] = useState(false);
+  const [interviewError, setInterviewError] = useState<string | null>(null);
+  const [interviewInput, setInterviewInput] = useState('');
+  const [interviewNextQuestion, setInterviewNextQuestion] = useState<AdvisorConvoNextQuestion | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const [gptHealth, setGptHealth] = useState<{ ok: boolean; provider: 'openai' | 'azure' | 'unknown'; message?: string } | null>(null);
   const [gptChecking, setGptChecking] = useState(false);
@@ -205,6 +224,18 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     setFormError(null);
   }, [currentQuestion?.id]);
 
+  useEffect(() => {
+    if (!interviewOpen) {
+      setInterviewMessages([]);
+      setInterviewStarted(false);
+      setInterviewLoading(false);
+      setInterviewCompleted(false);
+      setInterviewError(null);
+      setInterviewInput('');
+      setInterviewNextQuestion(null);
+    }
+  }, [interviewOpen]);
+
   function maybePushQuestion(question: AdvisorQuestion | null) {
     if (question && !askedQuestionsRef.current.has(question.id)) {
       askedQuestionsRef.current.add(question.id);
@@ -216,6 +247,76 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           content: question.label
         }
       ]);
+    }
+  }
+
+  function pushInterviewStep(step: AdvisorConvoStep) {
+    if (step.message) {
+      setInterviewMessages((prev) => [
+        ...prev,
+        { id: generateId('interview-assistant'), role: 'assistant', content: step.message }
+      ]);
+    }
+    setInterviewNextQuestion(step.nextQuestion);
+    setInterviewCompleted(step.completed);
+    if (!step.completed && step.nextQuestion?.type === 'select' && step.nextQuestion.options?.length) {
+      setInterviewInput(step.nextQuestion.options[0].value);
+    } else {
+      setInterviewInput('');
+    }
+  }
+
+  async function startInterview() {
+    if (interviewLoading || interviewStarted) {
+      return;
+    }
+    setInterviewError(null);
+    setInterviewLoading(true);
+    setInterviewStarted(true);
+    try {
+      const step = await postAdvisorConversation({
+        expertId: interviewExpert,
+        message:
+          "Démarre l'entretien et pose-moi la première question pour collecter mes informations personnelles.",
+        snapshot: {}
+      });
+      pushInterviewStep(step);
+    } catch (err) {
+      console.error('Failed to start guided interview', err);
+      setInterviewError("Impossible de démarrer l'entretien. Réessayez plus tard.");
+      setInterviewStarted(false);
+    } finally {
+      setInterviewLoading(false);
+    }
+  }
+
+  async function handleInterviewSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!interviewStarted || interviewLoading || interviewCompleted) {
+      return;
+    }
+
+    const value = interviewInput.trim();
+    if (!value) {
+      setInterviewError('Merci de répondre avant de continuer.');
+      return;
+    }
+
+    setInterviewMessages((prev) => [
+      ...prev,
+      { id: generateId('interview-user'), role: 'user', content: value }
+    ]);
+    setInterviewInput('');
+    setInterviewError(null);
+    setInterviewLoading(true);
+    try {
+      const step = await postAdvisorConversation({ expertId: interviewExpert, message: value, snapshot: {} });
+      pushInterviewStep(step);
+    } catch (err) {
+      console.error('Guided interview step failed', err);
+      setInterviewError('Impossible de poursuivre pour le moment. Essayez à nouveau.');
+    } finally {
+      setInterviewLoading(false);
     }
   }
 
@@ -679,6 +780,38 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
 
       <Paper elevation={3} sx={{ p: 3 }}>
         <Stack spacing={2}>
+          <Typography variant="h5">Entretien guidé</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Sélectionnez l’expert qui pilotera l’entretien et répondra à vos questions tout en collectant vos
+            informations personnelles.
+          </Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+            <TextField
+              select
+              label="Expert animateur"
+              value={interviewExpert}
+              onChange={(event) => setInterviewExpert(event.target.value as AdvisorInterviewerId)}
+              sx={{ width: { xs: '100%', sm: 260 } }}
+            >
+              {(['fiscaliste', 'comptable', 'planificateur', 'avocat'] as AdvisorInterviewerId[]).map((option) => (
+                <MenuItem key={option} value={option}>
+                  {expertLabels[option] ?? option}
+                </MenuItem>
+              ))}
+            </TextField>
+            <Button
+              variant="contained"
+              startIcon={<PsychologyIcon />}
+              onClick={() => setInterviewOpen(true)}
+            >
+              Choisir cet expert
+            </Button>
+          </Stack>
+        </Stack>
+      </Paper>
+
+      <Paper elevation={3} sx={{ p: 3 }}>
+        <Stack spacing={2}>
           <Typography variant="h5">Questions ciblees</Typography>
           <Typography variant="body2" color="text.secondary">
             Choisissez un expert ou le comite IA pour obtenir une reponse ciblee basee sur vos reponses actuelles.
@@ -830,6 +963,143 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           )}
         </Stack>
       </Paper>
+
+      <Dialog open={interviewOpen} onClose={() => setInterviewOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Entretien guidé avec un expert</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <TextField
+              select
+              label="Expert"
+              value={interviewExpert}
+              onChange={(event) => setInterviewExpert(event.target.value as AdvisorInterviewerId)}
+              disabled={interviewStarted && !interviewCompleted}
+            >
+              {(['fiscaliste', 'comptable', 'planificateur', 'avocat'] as AdvisorInterviewerId[]).map((option) => (
+                <MenuItem key={option} value={option}>
+                  {expertLabels[option] ?? option}
+                </MenuItem>
+              ))}
+            </TextField>
+
+            {interviewError && <Alert severity="error">{interviewError}</Alert>}
+
+            {interviewStarted ? (
+              <>
+                <Paper variant="outlined" sx={{ p: 2, maxHeight: 280, overflowY: 'auto' }}>
+                  <Stack spacing={1.5}>
+                    {interviewMessages.map((entry) => (
+                      <Box
+                        key={entry.id}
+                        sx={{
+                          alignSelf: entry.role === 'user' ? 'flex-end' : 'flex-start',
+                          backgroundColor: entry.role === 'user' ? 'primary.main' : 'grey.100',
+                          color: entry.role === 'user' ? 'primary.contrastText' : 'text.primary',
+                          px: 2,
+                          py: 1,
+                          borderRadius: 2,
+                          maxWidth: '85%'
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                          {entry.content}
+                        </Typography>
+                      </Box>
+                    ))}
+                    {interviewLoading && (
+                      <Typography variant="body2" color="text.secondary">
+                        {expertLabels[interviewExpert]} réfléchit…
+                      </Typography>
+                    )}
+                  </Stack>
+                </Paper>
+
+                {interviewNextQuestion && (
+                  <Alert severity="info">
+                    {interviewNextQuestion.label}
+                    {interviewNextQuestion.options?.length ? ' — sélectionnez ou répondez ci-dessous.' : ''}
+                  </Alert>
+                )}
+
+                {interviewCompleted && (
+                  <Alert severity="success">
+                    Entretien terminé. Vous pouvez fermer la fenêtre ou relancer avec un autre spécialiste.
+                  </Alert>
+                )}
+
+                {!interviewCompleted && (
+                  <Stack component="form" spacing={2} onSubmit={handleInterviewSubmit}>
+                    {(() => {
+                      const isSelectQuestion =
+                        interviewNextQuestion?.type === 'select' && interviewNextQuestion.options?.length;
+                      const isNumberQuestion = interviewNextQuestion?.type === 'number';
+                      if (isSelectQuestion) {
+                        return (
+                          <TextField
+                            select
+                            label="Votre réponse"
+                            value={interviewInput}
+                            onChange={(event) => setInterviewInput(event.target.value)}
+                            required
+                            fullWidth
+                          >
+                            {interviewNextQuestion?.options?.map((option) => (
+                              <MenuItem key={option.value} value={option.value}>
+                                {option.label}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        );
+                      }
+                      return (
+                        <TextField
+                          label="Votre réponse"
+                          value={interviewInput}
+                          onChange={(event) => setInterviewInput(event.target.value)}
+                          required
+                          fullWidth
+                          placeholder={interviewNextQuestion?.placeholder}
+                          type={isNumberQuestion ? 'number' : 'text'}
+                          inputProps={
+                            isNumberQuestion
+                              ? { inputMode: 'decimal', 'aria-label': 'Réponse numérique ou texte' }
+                              : undefined
+                          }
+                        />
+                      );
+                    })()}
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      disabled={interviewLoading}
+                      startIcon={<QuestionAnswerIcon />}
+                    >
+                      Envoyer ma réponse
+                    </Button>
+                  </Stack>
+                )}
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Choisissez un expert puis lancez l’entretien pour qu’il vous pose des questions ciblées.
+              </Typography>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setInterviewOpen(false)}>Fermer</Button>
+          {!interviewStarted && (
+            <Button
+              variant="contained"
+              onClick={startInterview}
+              disabled={interviewLoading}
+              startIcon={<QuestionAnswerIcon />}
+            >
+              Lancer l’entretien
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
 
       {result?.completed && (
         <Stack spacing={4}>
