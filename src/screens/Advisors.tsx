@@ -107,6 +107,17 @@ const expertLabels: Record<string, string> = {
   group: 'Comite IA'
 };
 
+const PRIORITY_QUESTION_IDS = [
+  'assetProfile',
+  'taxableIncome',
+  'profitMargin',
+  'province',
+  'holdingStructure',
+  'dividendIntent',
+  'liquidityGoal',
+  'legalConcern'
+] as const;
+
 function isUnauthorizedError(error: unknown): boolean {
   return axios.isAxiosError(error) && error.response?.status === 401;
 }
@@ -159,10 +170,67 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [interviewInput, setInterviewInput] = useState('');
   const [interviewNextQuestion, setInterviewNextQuestion] = useState<AdvisorConvoNextQuestion | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const interviewAnsweredRef = useRef<Set<string>>(new Set());
   const [gptHealth, setGptHealth] = useState<{ ok: boolean; provider: 'openai' | 'azure' | 'unknown'; message?: string } | null>(null);
   const [gptChecking, setGptChecking] = useState(false);
 
   const askedQuestionsRef = useRef(new Set<string>());
+
+  const priorityQuestions = useMemo(() => {
+    if (!questions.length) {
+      return [];
+    }
+    const byId = new Map<string, AdvisorQuestion>(questions.map((question) => [question.id, question]));
+    return PRIORITY_QUESTION_IDS.map((id) => byId.get(id)).filter((question): question is AdvisorQuestion => Boolean(question));
+  }, [questions]);
+
+  const priorityQuestionSummary = useMemo(() => {
+    if (!priorityQuestions.length) {
+      return '';
+    }
+    return priorityQuestions.map((question) => question.label).join(' • ');
+  }, [priorityQuestions]);
+
+  function formatPriorityList(list: AdvisorQuestion[]): string {
+    return list.map((item, index) => `${index + 1}. ${item.label}`).join('\n');
+  }
+
+  function buildInitialInterviewPrompt(): string {
+    const listText = priorityQuestions.length ? formatPriorityList(priorityQuestions) : '';
+    const instructions = [
+      "Objectif: entretien rapide pour collecter les informations essentielles du dossier immobilier.",
+      listText
+        ? `Questions prioritaires à poser dans l'ordre:\n${listText}`
+        : 'Pose uniquement les questions critiques (profil, revenus, fiscalité, objectifs) et rien de plus.',
+      'Pose une seule question concise à la fois et attends ma réponse avant de poursuivre.'
+    ];
+    return instructions.join('\n');
+  }
+
+  function buildFollowUpPrompt(params: {
+    answerLabel: string;
+    answerValue: string;
+    question: AdvisorConvoNextQuestion | null;
+  }): string {
+    const { answerLabel, answerValue, question } = params;
+    const answered = new Set(interviewAnsweredRef.current);
+    if (question) {
+      answered.add(question.id);
+    }
+    const remaining = priorityQuestions.filter((item) => !answered.has(item.id));
+    const remainingText = remaining.length
+      ? `Questions prioritaires restantes:\n${formatPriorityList(remaining)}`
+      : 'Toutes les questions prioritaires ont été couvertes. Fournis un bref récapitulatif et les prochaines étapes.';
+    const questionLabel = question?.label ?? 'la question précédente';
+    return [
+      'Rappel: entretien accéléré, limite-toi aux informations clés.',
+      remainingText,
+      `Réponse fournie pour "${questionLabel}": ${answerLabel} (valeur brute: ${answerValue}).`,
+      remaining.length
+        ? 'Passe immédiatement à la prochaine question prioritaire restante.'
+        : 'Conclue avec un résumé clair et les actions à prioriser.'
+    ].join('\n');
+  }
 
   const currentQuestion = useMemo(() => result?.nextQuestion ?? null, [result?.nextQuestion]);
   const engineMeta = result?.engine;
@@ -233,6 +301,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       setInterviewError(null);
       setInterviewInput('');
       setInterviewNextQuestion(null);
+      interviewAnsweredRef.current = new Set();
     }
   }, [interviewOpen]);
 
@@ -297,11 +366,12 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     setInterviewError(null);
     setInterviewLoading(true);
     setInterviewStarted(true);
+    interviewAnsweredRef.current = new Set();
     try {
+      const prompt = buildInitialInterviewPrompt();
       const step = await postAdvisorConversation({
         expertId: interviewExpert,
-        message:
-          "Démarre l'entretien et pose-moi la première question pour collecter mes informations personnelles.",
+        message: prompt,
         snapshot: {}
       });
       pushInterviewStep(step);
@@ -320,24 +390,34 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       return;
     }
 
-    const questionType = interviewNextQuestion?.type;
-    const value = questionType === 'select' ? interviewInput : interviewInput.trim();
-    if (!value) {
+    const activeQuestion = interviewNextQuestion;
+    const questionType = activeQuestion?.type;
+    const rawValue = questionType === 'select' ? interviewInput : interviewInput.trim();
+    if (!rawValue) {
       setInterviewError('Merci de répondre avant de continuer.');
       return;
     }
 
-    const activeQuestion = interviewNextQuestion;
+    const displayValue =
+      questionType === 'select'
+        ? activeQuestion?.options?.find((option) => option.value === rawValue)?.label ?? rawValue
+        : rawValue;
+
+    const prompt = buildFollowUpPrompt({
+      answerLabel: displayValue,
+      answerValue: rawValue,
+      question: activeQuestion
+    });
 
     setInterviewMessages((prev) => [
       ...prev,
-      { id: generateId('interview-user'), role: 'user', content: value }
+      { id: generateId('interview-user'), role: 'user', content: displayValue }
     ]);
     setInterviewError(null);
     setInterviewLoading(true);
 
     try {
-      const step = await postAdvisorConversation({ expertId: interviewExpert, message: value, snapshot: {} });
+      const step = await postAdvisorConversation({ expertId: interviewExpert, message: prompt, snapshot: {} });
       setInterviewInput('');
       pushInterviewStep(step);
     } catch (err) {
@@ -348,21 +428,16 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     }
 
     if (activeQuestion) {
-      const mapped: AdvisorQuestion = {
-        id: activeQuestion.id,
-        label: activeQuestion.label,
-        type: activeQuestion.type,
-        options: activeQuestion.options
-      };
-      maybePushQuestion(mapped);
-
-      const updatedAnswers = upsertAnswer(activeQuestion.id, value);
+      const updatedAnswers = upsertAnswer(activeQuestion.id, rawValue);
+      const updatedSet = new Set(interviewAnsweredRef.current);
+      updatedSet.add(activeQuestion.id);
+      interviewAnsweredRef.current = updatedSet;
       setConversation((prev) => [
         ...prev,
         {
           id: generateId('interview-answer'),
           role: 'user',
-          content: value
+          content: displayValue
         }
       ]);
 
@@ -390,6 +465,15 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           setError("Impossible de poursuivre la simulation. Réessayez dans quelques instants.");
         }
       }
+    } else {
+      setConversation((prev) => [
+        ...prev,
+        {
+          id: generateId('interview-freeform'),
+          role: 'user',
+          content: displayValue
+        }
+      ]);
     }
 
     setInterviewLoading(false);
@@ -860,6 +944,11 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
             Sélectionnez l’expert qui pilotera l’entretien et répondra à vos questions tout en collectant vos
             informations personnelles.
           </Typography>
+          {priorityQuestionSummary && (
+            <Alert severity="info" variant="outlined">
+              Questions prioritaires : {priorityQuestionSummary}
+            </Alert>
+          )}
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
             <TextField
               select
