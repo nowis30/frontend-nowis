@@ -1,26 +1,29 @@
 import { useMemo, useState } from 'react';
-import { useAuthStore } from '../store/authStore';
+import { useNavigate } from 'react-router-dom';
+import {
+  Bar,
+  BarChart,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from 'recharts';
 import {
   Box,
   Button,
+  Chip,
   CircularProgress,
+  Divider,
   Grid,
   Paper,
+  Stack,
   Typography
 } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend
-} from 'recharts';
+
+import { useAuthStore } from '../store/authStore';
 
 import { apiClient } from '../api/client';
-import { MetricCard } from '../components/MetricCard';
 import { useSummary } from '../api/summary';
 import { downloadBlob } from '../utils/download';
 
@@ -66,6 +69,61 @@ function DashboardScreen() {
   const latestStatement = data.corporate.latestStatement;
   const latestResolution = data.corporate.latestResolution;
 
+  const primaryMetrics = [
+    {
+      label: 'Revenus',
+      value: formatter.format(data.totals.grossIncome),
+      helper: 'Total des loyers et revenus récurrents'
+    },
+    {
+      label: 'Dépenses',
+      value: formatter.format(data.totals.operatingExpenses),
+      helper: "Charges d'exploitation"
+    },
+    {
+      label: 'Cashflow net',
+      value: formatter.format(data.totals.netCashflow),
+      helper: 'Après service de la dette'
+    }
+  ];
+
+  const portfolioChips = [
+    {
+      label: 'Capital remboursé',
+      value: formatter.format(data.totals.principalPortion)
+    },
+    {
+      label: 'Intérêts payés',
+      value: formatter.format(data.totals.interestPortion)
+    },
+    {
+      label: 'CCA',
+      value: formatter.format(data.totals.cca)
+    },
+    {
+      label: 'Équité',
+      value: formatter.format(data.totals.equity)
+    }
+  ];
+
+  const corporateHighlights = [
+    {
+      label: 'Sociétés actives',
+      value: data.corporate.companiesCount.toString(),
+      helper: 'Dossiers corporatifs suivis'
+    },
+    {
+      label: "Transactions d'actions",
+      value: data.corporate.shareTransactionsCount.toString(),
+      helper: `Valeur ${formatter.format(data.corporate.shareTransactionsValue)}`
+    },
+    {
+      label: 'Bénéfice net consolidé',
+      value: formatter.format(data.corporate.totalNetIncome),
+      helper: 'Somme des états financiers'
+    }
+  ];
+
   const handleExportCsv = async () => {
     try {
       setExportingCsv(true);
@@ -95,129 +153,125 @@ function DashboardScreen() {
   };
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Tableau de bord consolidé</Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={() => navigate('/advisors')}
-            aria-label="Ouvrir les Conseillers IA"
-          >
-            Conseillers IA
-          </Button>
-          <Button variant="outlined" onClick={handleExportCsv} disabled={exportingCsv || exportingPdf}>
-            {exportingCsv ? 'Export...' : 'Exporter CSV'}
-          </Button>
-          <Button variant="contained" onClick={handleExportPdf} disabled={exportingCsv || exportingPdf}>
-            {exportingPdf ? 'Export...' : 'Exporter PDF'}
-          </Button>
-          <Button
-            variant="text"
-            color="error"
-            onClick={() => {
-              setToken(null);
-              navigate('/login');
-            }}
-            aria-label="Déconnexion"
-          >
-            Se déconnecter
-          </Button>
-        </Box>
-      </Box>
+    <Stack spacing={3}>
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 3, md: 4 },
+          borderRadius: 4,
+          background: 'linear-gradient(135deg, #1e88e5 0%, #1565c0 60%, #0d47a1 100%)',
+          color: 'common.white'
+        }}
+      >
+        <Stack spacing={4}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ md: 'center' }}>
+            <Stack spacing={0.5}>
+              <Typography variant="h4">Tableau de bord consolidé</Typography>
+              <Typography variant="body2" sx={{ opacity: 0.85 }}>
+                Vue d’ensemble de vos actifs, de la trésorerie et des suivis corporatifs.
+              </Typography>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+              <Button variant="contained" color="secondary" onClick={() => navigate('/advisors')}>
+                Conseillers IA
+              </Button>
+              <Button variant="outlined" color="inherit" onClick={handleExportCsv} disabled={exportingCsv || exportingPdf}>
+                {exportingCsv ? 'Export…' : 'Exporter CSV'}
+              </Button>
+              <Button variant="outlined" color="inherit" onClick={handleExportPdf} disabled={exportingCsv || exportingPdf}>
+                {exportingPdf ? 'Export…' : 'Exporter PDF'}
+              </Button>
+              <Button
+                variant="text"
+                color="inherit"
+                onClick={() => {
+                  setToken(null);
+                  navigate('/login');
+                }}
+              >
+                Se déconnecter
+              </Button>
+            </Stack>
+          </Stack>
+
+          <Grid container spacing={3}>
+            {primaryMetrics.map((metric) => (
+              <Grid item xs={12} md={4} key={metric.label}>
+                <Stack spacing={0.5}>
+                  <Typography variant="overline" sx={{ opacity: 0.75 }}>
+                    {metric.label}
+                  </Typography>
+                  <Typography variant="h4">{metric.value}</Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.85 }}>
+                    {metric.helper}
+                  </Typography>
+                </Stack>
+              </Grid>
+            ))}
+          </Grid>
+
+          <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1}>
+            {portfolioChips.map((chip) => (
+              <Chip
+                key={chip.label}
+                variant="outlined"
+                color="default"
+                sx={{ borderColor: 'rgba(255,255,255,0.35)', color: 'common.white' }}
+                label={`${chip.label}: ${chip.value}`}
+              />
+            ))}
+          </Stack>
+        </Stack>
+      </Paper>
+
       <Grid container spacing={3}>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Revenus"
-            value={formatter.format(data.totals.grossIncome)}
-            helper="Total des loyers et revenus récurrents"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Dépenses"
-            value={formatter.format(data.totals.operatingExpenses)}
-            helper="Charges d'exploitation"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Cashflow net"
-            value={formatter.format(data.totals.netCashflow)}
-            helper="Après service de la dette"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Capital remboursé"
-            value={formatter.format(data.totals.principalPortion)}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Intérêts payés"
-            value={formatter.format(data.totals.interestPortion)}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="CCA"
-            value={formatter.format(data.totals.cca)}
-            helper="Déduction pour amortissement"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Équité"
-            value={formatter.format(data.totals.equity)}
-            helper="Valeur nette cumulée"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Sociétés actives"
-            value={data.corporate.companiesCount.toString()}
-            helper="Dossiers corporatifs suivis"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Transactions d'actions"
-            value={data.corporate.shareTransactionsCount.toString()}
-            helper={`Valeur totale ${formatter.format(data.corporate.shareTransactionsValue)}`}
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            label="Bénéfice net consolidé"
-            value={formatter.format(data.corporate.totalNetIncome)}
-            helper="Somme des états financiers"
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Performance par immeuble
+        <Grid item xs={12} md={7}>
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="h6">Performance par immeuble</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Revenus, dépenses et cashflow net pour chaque immeuble géré.
             </Typography>
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={chartData}>
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="Revenus" fill="#1976d2" />
-                <Bar dataKey="Dépenses" fill="#ef6c00" />
-                <Bar dataKey="Cashflow" fill="#2e7d32" />
-              </BarChart>
-            </ResponsiveContainer>
+            <Box sx={{ flexGrow: 1 }}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData}>
+                  <XAxis dataKey="name" hide={chartData.length > 6} />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="Revenus" fill="#1e88e5" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="Dépenses" fill="#fb8c00" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="Cashflow" fill="#43a047" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
           </Paper>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} md={5}>
           <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="h6">Indicateurs corporatifs</Typography>
+            <Divider />
+            <Stack spacing={2}>
+              {corporateHighlights.map((item) => (
+                <Box key={item.label}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    {item.label}
+                  </Typography>
+                  <Typography variant="h6">{item.value}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {item.helper}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Typography variant="h6">Dernier état financier</Typography>
+            <Divider />
             {latestStatement ? (
-              <>
+              <Stack spacing={1.5}>
                 <Typography variant="subtitle1">{latestStatement.companyName}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   {new Date(latestStatement.periodEnd).toLocaleDateString('fr-CA')} · {latestStatement.statementType}
@@ -231,7 +285,6 @@ function DashboardScreen() {
                 <Button
                   size="small"
                   variant="outlined"
-                  sx={{ alignSelf: 'flex-start' }}
                   onClick={() =>
                     navigate(
                       `/companies?companyId=${latestStatement.companyId}&statementId=${latestStatement.id}`
@@ -240,7 +293,7 @@ function DashboardScreen() {
                 >
                   Ouvrir dans Companies
                 </Button>
-              </>
+              </Stack>
             ) : (
               <Typography variant="body2" color="text.secondary">
                 Aucun état financier enregistré.
@@ -248,11 +301,13 @@ function DashboardScreen() {
             )}
           </Paper>
         </Grid>
+
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Typography variant="h6">Dernière résolution</Typography>
+            <Divider />
             {latestResolution ? (
-              <>
+              <Stack spacing={1.5}>
                 <Typography variant="subtitle1">{latestResolution.companyName}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   {new Date(latestResolution.resolutionDate).toLocaleDateString('fr-CA')} · {latestResolution.type}
@@ -261,7 +316,6 @@ function DashboardScreen() {
                 <Button
                   size="small"
                   variant="outlined"
-                  sx={{ alignSelf: 'flex-start' }}
                   onClick={() =>
                     navigate(
                       `/companies?companyId=${latestResolution.companyId}&resolutionId=${latestResolution.id}`
@@ -270,7 +324,7 @@ function DashboardScreen() {
                 >
                   Ouvrir dans Companies
                 </Button>
-              </>
+              </Stack>
             ) : (
               <Typography variant="body2" color="text.secondary">
                 Aucune résolution en dossier.
@@ -279,7 +333,7 @@ function DashboardScreen() {
           </Paper>
         </Grid>
       </Grid>
-    </Box>
+    </Stack>
   );
 }
 
