@@ -250,12 +250,36 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     }
   }
 
+  function upsertAnswer(questionId: string, value: string): AdvisorAnswer[] {
+    let nextAnswers: AdvisorAnswer[] = [];
+    setAnswers((previous) => {
+      const index = previous.findIndex((entry) => entry.questionId === questionId);
+      if (index === -1) {
+        nextAnswers = [...previous, { questionId, value }];
+        return nextAnswers;
+      }
+      nextAnswers = [...previous];
+      nextAnswers[index] = { questionId, value };
+      return nextAnswers;
+    });
+    return nextAnswers;
+  }
+
   function pushInterviewStep(step: AdvisorConvoStep) {
     if (step.message) {
       setInterviewMessages((prev) => [
         ...prev,
         { id: generateId('interview-assistant'), role: 'assistant', content: step.message }
       ]);
+    }
+    if (step.nextQuestion) {
+      const mapped: AdvisorQuestion = {
+        id: step.nextQuestion.id,
+        label: step.nextQuestion.label,
+        type: step.nextQuestion.type,
+        options: step.nextQuestion.options
+      };
+      maybePushQuestion(mapped);
     }
     setInterviewNextQuestion(step.nextQuestion);
     setInterviewCompleted(step.completed);
@@ -296,28 +320,79 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       return;
     }
 
-    const value = interviewInput.trim();
+    const questionType = interviewNextQuestion?.type;
+    const value = questionType === 'select' ? interviewInput : interviewInput.trim();
     if (!value) {
       setInterviewError('Merci de répondre avant de continuer.');
       return;
     }
 
+    const activeQuestion = interviewNextQuestion;
+
     setInterviewMessages((prev) => [
       ...prev,
       { id: generateId('interview-user'), role: 'user', content: value }
     ]);
-    setInterviewInput('');
     setInterviewError(null);
     setInterviewLoading(true);
+
     try {
       const step = await postAdvisorConversation({ expertId: interviewExpert, message: value, snapshot: {} });
+      setInterviewInput('');
       pushInterviewStep(step);
     } catch (err) {
       console.error('Guided interview step failed', err);
       setInterviewError('Impossible de poursuivre pour le moment. Essayez à nouveau.');
-    } finally {
       setInterviewLoading(false);
+      return;
     }
+
+    if (activeQuestion) {
+      const mapped: AdvisorQuestion = {
+        id: activeQuestion.id,
+        label: activeQuestion.label,
+        type: activeQuestion.type,
+        options: activeQuestion.options
+      };
+      maybePushQuestion(mapped);
+
+      const updatedAnswers = upsertAnswer(activeQuestion.id, value);
+      setConversation((prev) => [
+        ...prev,
+        {
+          id: generateId('interview-answer'),
+          role: 'user',
+          content: value
+        }
+      ]);
+
+      try {
+        const priorCompleted = result?.completed ?? false;
+        const evaluation = await evaluateWithPreferredEngine(updatedAnswers);
+        setResult(evaluation);
+        maybePushQuestion(evaluation.nextQuestion);
+        if (evaluation.completed && !priorCompleted) {
+          setConversation((prev) => [
+            ...prev,
+            {
+              id: generateId('interview-summary'),
+              role: 'summary',
+              content: evaluation.coordinatorSummary
+            }
+          ]);
+        }
+      } catch (err) {
+        console.error('Evaluation failed during guided interview', err);
+        if (isUnauthorizedError(err)) {
+          onUnauthorized?.();
+          setError('Clé invalide ou expirée. Merci de la saisir à nouveau.');
+        } else {
+          setError("Impossible de poursuivre la simulation. Réessayez dans quelques instants.");
+        }
+      }
+    }
+
+    setInterviewLoading(false);
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
