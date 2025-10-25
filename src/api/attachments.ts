@@ -72,3 +72,31 @@ export async function downloadAttachment(
 
   return response.data as Blob;
 }
+
+export interface ExtractedExpenseDto {
+  extracted: {
+    label: string;
+    category: string;
+    amount: number;
+    startDate: string;
+    endDate: string | null;
+    confidence: number;
+    rawText?: string;
+  };
+  createdExpenseId: number | null;
+}
+
+export async function extractExpenseFromAttachment(
+  propertyId: number,
+  attachmentId: number,
+  options: { autoCreate?: boolean } = {}
+): Promise<ExtractedExpenseDto> {
+  const params = new URLSearchParams();
+  if (options.autoCreate) params.set('autoCreate', 'true');
+  const query = params.toString();
+  const endpoint = query
+    ? `/properties/${propertyId}/attachments/${attachmentId}/extract?${query}`
+    : `/properties/${propertyId}/attachments/${attachmentId}/extract`;
+  const { data } = await apiClient.post<ExtractedExpenseDto>(endpoint, {});
+  return data;
+}

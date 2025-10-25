@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios';
 
 import { useAuthStore } from '../store/authStore';

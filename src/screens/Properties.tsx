@@ -23,7 +23,8 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Stack
+  Stack,
+  Link
 } from '@mui/material';
 import LinearProgress from '@mui/material/LinearProgress';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -32,6 +33,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import ApartmentIcon from '@mui/icons-material/Apartment';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import DownloadIcon from '@mui/icons-material/Download';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import { toDataURL as toQrDataURL } from 'qrcode';
 
 import { apiClient } from '../api/client';
 import { useSummary, type SummaryKpi } from '../api/summary';
@@ -58,9 +61,21 @@ import {
   uploadAttachment,
   deleteAttachment,
   downloadAttachment,
-  type AttachmentDto
+  type AttachmentDto,
+  extractExpenseFromAttachment,
+  type ExtractedExpenseDto
 } from '../api/attachments';
+import type { ExpensePayload, ExpenseDto } from '../api/expenses';
 import { downloadBlob } from '../utils/download';
+
+const EXPENSE_CATEGORY_SUGGESTIONS = [
+  'Entretien',
+  'Matériaux',
+  'Taxes',
+  'Assurances',
+  'Services publics',
+  'Autre'
+];
 
 interface PropertyPayload {
   name: string;
@@ -135,7 +150,7 @@ const parseDateToIso = (raw: string): string | null => {
     return value;
   }
 
-  const frPattern = /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/;
+  const frPattern = /^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/;
   if (frPattern.test(value)) {
     const normalized = value.replace(/-/g, '/');
     const [day, month, year] = normalized.split('/');
@@ -304,12 +319,90 @@ function PropertiesScreen() {
   const [editingMortgageId, setEditingMortgageId] = useState<number | null>(null);
   const [mortgageError, setMortgageError] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentInfo, setAttachmentInfo] = useState<string | null>(null);
+  const [mobileQrOpen, setMobileQrOpen] = useState(false);
+  const [mobileQrDataUrl, setMobileQrDataUrl] = useState<string | null>(null);
+  const [mobileQrLink, setMobileQrLink] = useState<string>('');
+  const [mobileQrLoading, setMobileQrLoading] = useState(false);
+  const [mobileQrError, setMobileQrError] = useState<string | null>(null);
+  const [extractionDialogOpen, setExtractionDialogOpen] = useState(false);
+  const [extractionConfidence, setExtractionConfidence] = useState<number | null>(null);
+  const [extractionAttachment, setExtractionAttachment] = useState<AttachmentDto | null>(null);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [extractionForm, setExtractionForm] = useState({
+    label: '',
+    category: '',
+    amount: '',
+    startDate: ''
+  });
   const [debouncedPreviewInput, setDebouncedPreviewInput] = useState<MortgagePreviewPayload | null>(
     null
   );
   const [attachmentFilter, setAttachmentFilter] = useState<AttachmentFilterValue>('all');
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const buildMobileUploadUrl = () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    if (!origin) {
+      return '/mobile-upload';
+    }
+    if (mortgagesContext) {
+      const params = new URLSearchParams({ propertyId: String(mortgagesContext.id) });
+      return `${origin}/mobile-upload?${params.toString()}`;
+    }
+    return `${origin}/mobile-upload`;
+  };
+
+  const handleOpenMobileQrDialog = async () => {
+    if (!mortgagesContext) {
+      setAttachmentError("Sélectionne d'abord un immeuble pour générer le lien mobile.");
+      return;
+    }
+    const targetUrl = buildMobileUploadUrl();
+    setAttachmentError(null);
+    setAttachmentInfo(null);
+    setMobileQrLink(targetUrl);
+    setMobileQrOpen(true);
+    setMobileQrLoading(true);
+    setMobileQrError(null);
+  setMobileQrDataUrl(null);
+    try {
+      const dataUrl = await toQrDataURL(targetUrl, { margin: 1, width: 320 });
+      setMobileQrDataUrl(dataUrl);
+    } catch (error) {
+      console.error('QR code generation failed', error);
+      setMobileQrError('Impossible de générer le QR code. Réessaie.');
+      setMobileQrDataUrl(null);
+    } finally {
+      setMobileQrLoading(false);
+    }
+  };
+
+  const handleCloseMobileQrDialog = () => {
+    setMobileQrOpen(false);
+    setMobileQrLoading(false);
+    setMobileQrError(null);
+  };
+
+  const handleCopyMobileLink = async () => {
+    if (!mobileQrLink) {
+      return;
+    }
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(mobileQrLink);
+      } else {
+        throw new Error('Clipboard API non disponible');
+      }
+      setAttachmentInfo('Lien mobile copié dans le presse-papiers.');
+      setAttachmentError(null);
+    } catch (error) {
+      console.error('Clipboard copy failed', error);
+      setAttachmentError('Impossible de copier le lien automatiquement.');
+    }
+  };
 
   const createMutation = useMutation({
     mutationFn: (payload: PropertyPayload) => apiClient.post('/properties', payload),
@@ -693,7 +786,7 @@ function PropertiesScreen() {
 
   const attachmentsQuery = useQuery<AttachmentDto[]>({
     queryKey: ['attachments', mortgagesContext?.id, attachmentFilter],
-    enabled: Boolean(mortgageDialogOpen && mortgagesContext),
+    enabled: Boolean(mortgagesContext),
     queryFn: async () => {
       if (!mortgagesContext) {
         return [];
@@ -715,6 +808,41 @@ function PropertiesScreen() {
 
     return attachments;
   }, [attachments, attachmentFilter]);
+
+  const extractExpenseMutation = useMutation({
+    mutationFn: async (attachment: AttachmentDto) => {
+      if (!mortgagesContext) throw new Error('Aucun immeuble sélectionné');
+      setAttachmentError(null);
+      setAttachmentInfo(null);
+      setExtractionError(null);
+      return await extractExpenseFromAttachment(mortgagesContext.id, attachment.id, { autoCreate: false });
+    },
+    onSuccess: (data: ExtractedExpenseDto, attachment: AttachmentDto) => {
+      const extracted = data.extracted;
+      const amountValue = Number(extracted.amount);
+      setExtractionAttachment(attachment);
+      setExtractionForm({
+        label: extracted.label ?? '',
+        category: extracted.category ?? '',
+        amount:
+          Number.isFinite(amountValue) && amountValue > 0 ? amountValue.toFixed(2) : '',
+        startDate: extracted.startDate ?? ''
+      });
+      setExtractionConfidence(
+        typeof extracted.confidence === 'number' && extracted.confidence >= 0
+          ? Math.min(1, Math.max(0, extracted.confidence))
+          : null
+      );
+      setExtractionDialogOpen(true);
+    },
+    onError: (error: unknown) => {
+      const message = getApiErrorMessage(error, 'Extraction impossible pour le moment.');
+      setAttachmentError(message);
+      setAttachmentInfo(null);
+      setExtractionAttachment(null);
+      setExtractionConfidence(null);
+    }
+  });
 
   const uploadAttachmentMutation = useMutation({
     mutationFn: async ({ file }: { file: File }) => {
@@ -782,6 +910,83 @@ function PropertiesScreen() {
       setDownloadingAttachmentId(null);
     }
   });
+
+  const createExpenseFromExtractionMutation = useMutation({
+    mutationFn: async (payload: ExpensePayload) => {
+      const { data } = await apiClient.post<ExpenseDto>('/expenses', payload);
+      return data;
+    },
+    onSuccess: (expense) => {
+      const formattedDate = expense.startDate ? expense.startDate.slice(0, 10) : '';
+      setAttachmentInfo(
+        `Dépense créée (#${expense.id}) : ${expense.label} – ${expense.amount.toFixed(2)}$ le ${formattedDate}`
+      );
+      setExtractionDialogOpen(false);
+      setExtractionAttachment(null);
+      setExtractionConfidence(null);
+      setExtractionError(null);
+      setExtractionForm({ label: '', category: '', amount: '', startDate: '' });
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['summary'] });
+    },
+    onError: (error: unknown) => {
+      setExtractionError(getApiErrorMessage(error, "Impossible de créer la dépense."));
+    }
+  });
+
+  const handleExtractionFieldChange = (field: keyof typeof extractionForm) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setExtractionForm((prev) => ({ ...prev, [field]: value }));
+    };
+
+  const handleExtractionCategorySuggestion = (suggestion: string) => {
+    setExtractionForm((prev) => ({ ...prev, category: suggestion }));
+  };
+
+  const handleExtractionDialogClose = () => {
+    if (createExpenseFromExtractionMutation.isPending) {
+      return;
+    }
+    setExtractionDialogOpen(false);
+    setExtractionAttachment(null);
+    setExtractionConfidence(null);
+    setExtractionError(null);
+    setExtractionForm({ label: '', category: '', amount: '', startDate: '' });
+  };
+
+  const handleExtractionCreate = () => {
+    if (!mortgagesContext) {
+      setExtractionError('Sélectionne un immeuble avant de créer la dépense.');
+      return;
+    }
+
+    const normalizedAmount = extractionForm.amount.replace(',', '.');
+    const amountValue = Number.parseFloat(normalizedAmount);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      setExtractionError('Montant invalide. Indique un montant supérieur à 0.');
+      return;
+    }
+
+    if (!extractionForm.startDate || !/^\d{4}-\d{2}-\d{2}$/.test(extractionForm.startDate)) {
+      setExtractionError('Date invalide. Utilise le format AAAA-MM-JJ.');
+      return;
+    }
+
+    const roundedAmount = Math.round(amountValue * 100) / 100;
+    const payload: ExpensePayload = {
+      propertyId: mortgagesContext.id,
+      label: extractionForm.label.trim() || 'Dépense sans titre',
+      category: extractionForm.category.trim() || 'Autre',
+      amount: roundedAmount,
+      frequency: 'PONCTUEL',
+      startDate: extractionForm.startDate,
+      endDate: null
+    };
+
+    setExtractionError(null);
+    createExpenseFromExtractionMutation.mutate(payload);
+  };
 
   const mortgagePreviewSource = useMemo<MortgagePreviewPayload | null>(() => {
     if (!mortgageDialogOpen || !mortgagesContext) {
@@ -1818,6 +2023,11 @@ function PropertiesScreen() {
                   {attachmentError}
                 </Alert>
               )}
+              {attachmentInfo && (
+                <Alert severity="success" sx={{ mb: 2 }} onClose={() => setAttachmentInfo(null)}>
+                  {attachmentInfo}
+                </Alert>
+              )}
               <Stack
                 direction={{ xs: 'column', sm: 'row' }}
                 spacing={2}
@@ -1845,6 +2055,14 @@ function PropertiesScreen() {
                   </Select>
                 </FormControl>
                 <Stack direction="row" spacing={1} justifyContent="flex-end">
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    onClick={handleOpenMobileQrDialog}
+                    disabled={!mortgagesContext || mobileQrLoading}
+                  >
+                    Envoyer depuis le téléphone
+                  </Button>
                   <Button
                     variant="outlined"
                     onClick={handleUploadButtonClick}
@@ -1935,6 +2153,18 @@ function PropertiesScreen() {
                                   />
                                 </IconButton>
                                 <IconButton
+                                  aria-label="extraire"
+                                  onClick={() => extractExpenseMutation.mutate(attachment)}
+                                  disabled={extractExpenseMutation.isPending}
+                                  sx={{ mr: 0.5 }}
+                                  title="Extraire et créer la dépense"
+                                >
+                                  <AutoFixHighIcon
+                                    fontSize="small"
+                                    sx={{ opacity: extractExpenseMutation.isPending ? 0.5 : 1 }}
+                                  />
+                                </IconButton>
+                                <IconButton
                                   aria-label="supprimer"
                                   onClick={() => deleteAttachmentMutation.mutate(attachment)}
                                   disabled={deleteAttachmentMutation.isPending}
@@ -1949,6 +2179,137 @@ function PropertiesScreen() {
                     </Table>
                   </TableContainer>
                 )}
+              <Dialog
+                open={extractionDialogOpen}
+                onClose={handleExtractionDialogClose}
+                maxWidth="sm"
+                fullWidth
+              >
+                <DialogTitle>Valider la dépense extraite</DialogTitle>
+                <DialogContent>
+                  <Stack spacing={2} sx={{ mt: 1 }}>
+                    {extractionAttachment && (
+                      <Typography variant="body2" color="text.secondary">
+                        Pièce jointe&nbsp;: {extractionAttachment.title || extractionAttachment.filename}
+                      </Typography>
+                    )}
+                    {extractionConfidence !== null && (
+                      <Alert severity="info">
+                        Confiance de l&apos;IA&nbsp;: {(extractionConfidence * 100).toFixed(0)}%
+                      </Alert>
+                    )}
+                    <Typography variant="body2" color="text.secondary">
+                      Ajuste les champs avant de créer la dépense. Les montants sont en dollars.
+                    </Typography>
+                    <TextField
+                      label="Libellé"
+                      fullWidth
+                      value={extractionForm.label}
+                      onChange={handleExtractionFieldChange('label')}
+                    />
+                    <TextField
+                      label="Catégorie"
+                      fullWidth
+                      value={extractionForm.category}
+                      onChange={handleExtractionFieldChange('category')}
+                    />
+                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                      {EXPENSE_CATEGORY_SUGGESTIONS.map((suggestion) => (
+                        <Button
+                          key={suggestion}
+                          size="small"
+                          variant={
+                            extractionForm.category.toLowerCase() === suggestion.toLowerCase()
+                              ? 'contained'
+                              : 'outlined'
+                          }
+                          onClick={() => handleExtractionCategorySuggestion(suggestion)}
+                        >
+                          {suggestion}
+                        </Button>
+                      ))}
+                    </Stack>
+                    <TextField
+                      label="Montant ($)"
+                      type="number"
+                      inputProps={{ step: 0.01, min: 0 }}
+                      fullWidth
+                      value={extractionForm.amount}
+                      onChange={handleExtractionFieldChange('amount')}
+                    />
+                    <TextField
+                      label="Date (AAAA-MM-JJ)"
+                      type="date"
+                      fullWidth
+                      value={extractionForm.startDate}
+                      onChange={handleExtractionFieldChange('startDate')}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                    {extractionError && <Alert severity="error">{extractionError}</Alert>}
+                    {createExpenseFromExtractionMutation.isPending && <LinearProgress />}
+                  </Stack>
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={handleExtractionDialogClose} disabled={createExpenseFromExtractionMutation.isPending}>
+                    Annuler
+                  </Button>
+                  <Button
+                    variant="contained"
+                    onClick={handleExtractionCreate}
+                    disabled={createExpenseFromExtractionMutation.isPending}
+                  >
+                    {createExpenseFromExtractionMutation.isPending ? 'Création…' : 'Créer la dépense'}
+                  </Button>
+                </DialogActions>
+              </Dialog>
+              <Dialog open={mobileQrOpen} onClose={handleCloseMobileQrDialog} maxWidth="xs" fullWidth>
+                <DialogTitle>Envoyer depuis le téléphone</DialogTitle>
+                <DialogContent>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    Scanne ce QR code avec ton téléphone pour ouvrir la page de téléversement mobile
+                    dédiée à l&apos;immeuble <strong>{mortgagesContext?.name ?? ''}</strong>.
+                  </Typography>
+                  {mobileQrLoading && (
+                    <Box sx={{ my: 2 }}>
+                      <LinearProgress />
+                    </Box>
+                  )}
+                  {mobileQrError && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {mobileQrError}
+                    </Alert>
+                  )}
+                  {mobileQrDataUrl && !mobileQrLoading && (
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        mb: 2
+                      }}
+                    >
+                      <Box
+                        component="img"
+                        src={mobileQrDataUrl}
+                        alt="QR code de téléversement mobile"
+                        sx={{ width: '100%', maxWidth: 280 }}
+                      />
+                    </Box>
+                  )}
+                  <Typography variant="body2">
+                    Lien direct:&nbsp;
+                    <Link href={mobileQrLink} target="_blank" rel="noopener">
+                      {mobileQrLink}
+                    </Link>
+                  </Typography>
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={handleCopyMobileLink} disabled={!mobileQrLink}>
+                    Copier le lien
+                  </Button>
+                  <Button onClick={handleCloseMobileQrDialog}>Fermer</Button>
+                </DialogActions>
+              </Dialog>
             </Box>
           )}
           <Typography variant="h6" sx={{ mb: 2 }}>

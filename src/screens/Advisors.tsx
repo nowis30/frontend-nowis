@@ -140,6 +140,8 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [listening, setListening] = useState(false);
   const [speechActiveField, setSpeechActiveField] = useState<'main' | 'target' | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const [gptHealth, setGptHealth] = useState<{ ok: boolean; provider: 'openai' | 'azure' | 'unknown'; message?: string } | null>(null);
+  const [gptChecking, setGptChecking] = useState(false);
 
   const askedQuestionsRef = useRef(new Set<string>());
 
@@ -452,12 +454,44 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           Répondez aux questions du fiscaliste, comptable, planificateur et avocat. Le coordinateur fusionne leurs
           conseils pour un plan d’action clair.
         </Typography>
-        {engineDisplayLabel && (
-          <Stack spacing={1} sx={{ mt: 2 }}>
-            <Chip label={engineDisplayLabel} color="secondary" variant="outlined" />
-            {engineMeta?.note && <Alert severity="info">{engineMeta.note}</Alert>}
+        <Stack spacing={1} sx={{ mt: 2 }}>
+          {engineDisplayLabel && <Chip label={engineDisplayLabel} color="secondary" variant="outlined" />}
+          {engineMeta?.note && <Alert severity="info">{engineMeta.note}</Alert>}
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={async () => {
+                try {
+                  setGptChecking(true);
+                  setGptHealth(null);
+                  const { data } = await axios.get<{ engine: string; openai?: { ok: boolean; provider: 'openai' | 'azure' | 'unknown'; message?: string }; error?: string }>(
+                    '/api/advisors/health'
+                  );
+                  setGptHealth(data.openai ?? null);
+                } catch {
+                  setGptHealth({ ok: false, provider: 'unknown', message: "Diagnostic impossible" });
+                } finally {
+                  setGptChecking(false);
+                }
+              }}
+            >
+              {gptChecking ? 'Diagnostic…' : 'Vérifier GPT'}
+            </Button>
+            {gptHealth && (
+              <Chip
+                size="small"
+                color={gptHealth.ok ? 'success' : 'warning'}
+                label={gptHealth.ok ? `GPT OK (${gptHealth.provider})` : `GPT indisponible (${gptHealth.provider})`}
+              />
+            )}
           </Stack>
-        )}
+          {gptHealth && gptHealth.message && !gptHealth.ok && (
+            <Typography variant="caption" color="text.secondary">
+              {gptHealth.message}
+            </Typography>
+          )}
+        </Stack>
       </Box>
 
       {error && <Alert severity="error">{error}</Alert>}
