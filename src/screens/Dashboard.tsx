@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useAuthStore } from '../store/authStore';
 import {
   Box,
   Button,
@@ -28,6 +29,7 @@ function DashboardScreen() {
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const navigate = useNavigate();
+  const setToken = useAuthStore((state) => state.setToken);
 
   const chartData = useMemo(
     () =>
@@ -110,6 +112,17 @@ function DashboardScreen() {
           </Button>
           <Button variant="contained" onClick={handleExportPdf} disabled={exportingCsv || exportingPdf}>
             {exportingPdf ? 'Export...' : 'Exporter PDF'}
+          </Button>
+          <Button
+            variant="text"
+            color="error"
+            onClick={() => {
+              setToken(null);
+              navigate('/login');
+            }}
+            aria-label="Déconnexion"
+          >
+            Se déconnecter
           </Button>
         </Box>
       </Box>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, useRef, type ChangeEvent, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -93,6 +93,155 @@ interface MortgageFormState {
 
 type AttachmentFilterValue = 'all' | 'none' | number;
 
+type PropertyFieldKey = keyof PropertyPayload;
+
+type AssistantParseResult = {
+  value?: PropertyPayload[PropertyFieldKey];
+  error?: string;
+  note?: string;
+};
+
+interface AssistantQuestion {
+  id: PropertyFieldKey;
+  question: string;
+  optional?: boolean;
+  parse: (input: string) => AssistantParseResult;
+}
+
+interface AssistantMessage {
+  id: string;
+  role: 'assistant' | 'user' | 'summary';
+  content: string;
+}
+
+const SKIP_KEYWORDS = ['skip', 'passer', 'aucune', 'aucun', "je ne sais pas", 'je ne sais pas', 'ne sais pas', 'pas', 'n/a', 'vide'];
+
+const isSkipAnswer = (raw: string): boolean => {
+  const value = raw.trim().toLowerCase();
+  if (!value) {
+    return true;
+  }
+  return SKIP_KEYWORDS.some((keyword) => value === keyword || value.includes(keyword));
+};
+
+const parseDateToIso = (raw: string): string | null => {
+  const value = raw.trim();
+  if (!value) {
+    return null;
+  }
+
+  const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (isoPattern.test(value)) {
+    return value;
+  }
+
+  const frPattern = /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/;
+  if (frPattern.test(value)) {
+    const normalized = value.replace(/-/g, '/');
+    const [day, month, year] = normalized.split('/');
+    const iso = `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    const parsed = new Date(iso);
+    return Number.isNaN(parsed.getTime()) ? null : iso;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString().slice(0, 10);
+};
+
+const parseNumberInput = (raw: string): number | null => {
+  const value = raw.trim();
+  if (!value) {
+    return null;
+  }
+  const normalized = value
+    .replace(/\s+/g, '')
+    .replace(/\$/g, '')
+    .replace(/,/g, '.')
+    .replace(/[^0-9.-]/g, '');
+  if (!normalized) {
+    return null;
+  }
+  const numeric = Number(normalized);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return numeric;
+};
+
+const PROPERTY_ASSISTANT_QUESTIONS: AssistantQuestion[] = [
+  {
+    id: 'name',
+    question: "Quel est le nom de ton immeuble ou projet ?",
+    parse: (input) => {
+      const value = input.trim();
+      if (!value) {
+        return { error: 'Le nom est obligatoire pour identifier cet immeuble.' };
+      }
+      return { value };
+    }
+  },
+  {
+    id: 'address',
+    optional: true,
+    question: "Quelle est son adresse complète ? (tu peux répondre 'passer' si tu ne veux pas l'ajouter maintenant)",
+    parse: (input) => {
+      if (isSkipAnswer(input)) {
+        return { value: undefined, note: "D'accord, on laissera l'adresse vide pour le moment." };
+      }
+      return { value: input.trim() };
+    }
+  },
+  {
+    id: 'acquisitionDate',
+    optional: true,
+    question: "Quelle est la date d'acquisition ? (formats acceptés: AAAA-MM-JJ ou JJ/MM/AAAA)",
+    parse: (input) => {
+      if (isSkipAnswer(input)) {
+        return { value: undefined, note: "Très bien, on ajoutera la date plus tard." };
+      }
+      const iso = parseDateToIso(input);
+      if (!iso) {
+        return {
+          error: "Je n'ai pas reconnu ce format. Utilise AAAA-MM-JJ ou JJ/MM/AAAA, ou réponds 'passer'."
+        };
+      }
+      return { value: iso };
+    }
+  },
+  {
+    id: 'currentValue',
+    optional: true,
+    question: 'Quelle est la valeur actuelle approximative (en dollars canadiens) ?',
+    parse: (input) => {
+      if (isSkipAnswer(input)) {
+        return { value: undefined, note: "Aucun montant ajouté pour l'instant." };
+      }
+      const numeric = parseNumberInput(input);
+      if (numeric === null) {
+        return { error: "Indique un montant numérique, par exemple 750000 ou 'passer'." };
+      }
+      if (numeric < 0) {
+        return { error: 'Le montant doit être positif.' };
+      }
+      return { value: numeric };
+    }
+  },
+  {
+    id: 'notes',
+    optional: true,
+    question: 'Souhaites-tu ajouter une note ou un contexte particulier ?',
+    parse: (input) => {
+      if (isSkipAnswer(input) || !input.trim()) {
+        return { value: undefined, note: "Très bien, aucune note pour l'instant." };
+      }
+      return { value: input.trim() };
+    }
+  }
+];
+
 function useProperties() {
   return useQuery<PropertyDto[]>({
     queryKey: ['properties'],
@@ -110,6 +259,14 @@ function PropertiesScreen() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<PropertyPayload>({ name: '' });
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
+  const [assistantInput, setAssistantInput] = useState('');
+  const [assistantStep, setAssistantStep] = useState(0);
+  const [assistantCompleted, setAssistantCompleted] = useState(false);
+  const assistantScrollRef = useRef<HTMLDivElement | null>(null);
+  const generateAssistantId = (prefix: string) =>
+    `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const [ccaOpen, setCcaOpen] = useState(false);
   const [ccaError, setCcaError] = useState<string | null>(null);
   const [selectedPropertyId, setSelectedPropertyId] = useState<number | null>(null);
@@ -229,6 +386,14 @@ function PropertiesScreen() {
   const isSavingProperty = createMutation.isPending || updateMutation.isPending;
 
   useEffect(() => {
+    if (!assistantOpen) {
+      return;
+    }
+
+    assistantScrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [assistantMessages, assistantOpen]);
+
+  useEffect(() => {
     if (!ccaOpen || !depreciationSettings) {
       return;
     }
@@ -303,6 +468,170 @@ function PropertiesScreen() {
     }
 
     return dateFormatter.format(parsed);
+  };
+
+  const buildAssistantSummary = (state: PropertyPayload) => {
+    const lines = [
+      `Nom : ${state.name && state.name.trim().length > 0 ? state.name : 'à compléter manuellement'}`,
+      `Adresse : ${state.address && state.address.trim().length > 0 ? state.address : '—'}`,
+      `Date d'acquisition : ${state.acquisitionDate ?? '—'}`,
+      `Valeur actuelle : ${
+        typeof state.currentValue === 'number' && Number.isFinite(state.currentValue)
+          ? currencyFormatter.format(state.currentValue)
+          : '—'
+      }`,
+      `Notes : ${state.notes && state.notes.trim().length > 0 ? state.notes : '—'}`
+    ];
+
+    return [
+      'Résumé des informations saisies :',
+      ...lines,
+      "Tu peux fermer l’assistant et enregistrer lorsque tout te convient."
+    ].join('\n');
+  };
+
+  const startAssistantConversation = () => {
+    const firstQuestion = PROPERTY_ASSISTANT_QUESTIONS[0];
+    const introMessages: AssistantMessage[] = [
+      {
+        id: generateAssistantId('assistant'),
+        role: 'assistant',
+        content:
+          "Je vais t'aider à remplir les champs de l'immeuble. Réponds simplement et écris 'passer' si tu ne connais pas une information."
+      }
+    ];
+
+    if (firstQuestion) {
+      introMessages.push({
+        id: generateAssistantId('assistant'),
+        role: 'assistant',
+        content: firstQuestion.question
+      });
+    } else {
+      introMessages.push({
+        id: generateAssistantId('assistant'),
+        role: 'assistant',
+        content: 'Aucune question configurée pour le moment.'
+      });
+    }
+
+    setAssistantMessages(introMessages);
+    setAssistantStep(0);
+    setAssistantInput('');
+    setAssistantCompleted(false);
+    setAssistantOpen(true);
+  };
+
+  const advanceAssistant = (rawInput: string) => {
+    const question = PROPERTY_ASSISTANT_QUESTIONS[assistantStep];
+    if (!question) {
+      return;
+    }
+
+    const displayValue = rawInput.trim().length > 0 ? rawInput.trim() : '[Réponse vide]';
+    setAssistantMessages((prev) => [
+      ...prev,
+      {
+        id: generateAssistantId('user'),
+        role: 'user',
+        content: displayValue
+      }
+    ]);
+
+    const parseResult = question.parse(rawInput);
+    if (parseResult.error) {
+      setAssistantMessages((prev) => [
+        ...prev,
+        {
+          id: generateAssistantId('assistant'),
+          role: 'assistant',
+          content: parseResult.error ?? 'Je n’ai pas compris cette réponse. Essaie autrement.'
+        }
+      ]);
+      return;
+    }
+
+    const updatedForm: PropertyPayload = { ...form };
+    const key = question.id;
+    if (key === 'name') {
+      if (typeof parseResult.value === 'string' && parseResult.value.trim().length > 0) {
+        updatedForm.name = parseResult.value.trim();
+      }
+    } else if (key === 'address') {
+      updatedForm.address =
+        typeof parseResult.value === 'string' && parseResult.value.trim().length > 0
+          ? parseResult.value.trim()
+          : undefined;
+    } else if (key === 'acquisitionDate') {
+      updatedForm.acquisitionDate =
+        typeof parseResult.value === 'string' && parseResult.value.trim().length > 0
+          ? parseResult.value
+          : undefined;
+    } else if (key === 'currentValue') {
+      updatedForm.currentValue = typeof parseResult.value === 'number' ? parseResult.value : undefined;
+    } else if (key === 'notes') {
+      updatedForm.notes =
+        typeof parseResult.value === 'string' && parseResult.value.trim().length > 0
+          ? parseResult.value.trim()
+          : undefined;
+    }
+
+    setForm(updatedForm);
+
+    const messagesToAdd: AssistantMessage[] = [];
+    if (parseResult.note) {
+      messagesToAdd.push({
+        id: generateAssistantId('assistant'),
+        role: 'assistant',
+        content: parseResult.note
+      });
+    }
+
+    const nextStep = assistantStep + 1;
+    if (nextStep < PROPERTY_ASSISTANT_QUESTIONS.length) {
+      messagesToAdd.push({
+        id: generateAssistantId('assistant'),
+        role: 'assistant',
+        content: PROPERTY_ASSISTANT_QUESTIONS[nextStep].question
+      });
+    } else {
+      messagesToAdd.push({
+        id: generateAssistantId('summary'),
+        role: 'summary',
+        content: buildAssistantSummary(updatedForm)
+      });
+      setAssistantCompleted(true);
+    }
+
+    setAssistantMessages((prev) => [...prev, ...messagesToAdd]);
+    setAssistantStep(nextStep);
+  };
+
+  const handleAssistantSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (assistantCompleted) {
+      return;
+    }
+
+    if (!assistantInput.trim()) {
+      return;
+    }
+
+    const answer = assistantInput;
+    setAssistantInput('');
+    advanceAssistant(answer);
+  };
+
+  const handleAssistantSkip = () => {
+    if (assistantCompleted) {
+      return;
+    }
+    setAssistantInput('');
+    advanceAssistant('passer');
+  };
+
+  const handleAssistantClose = () => {
+    setAssistantOpen(false);
   };
 
   const totals = summary?.totals;
@@ -1080,6 +1409,7 @@ function PropertiesScreen() {
           setMutationError(null);
           setEditingPropertyId(null);
           setForm({ name: '' });
+          setAssistantOpen(false);
         }}
         fullWidth
       >
@@ -1155,30 +1485,125 @@ function PropertiesScreen() {
             </Grid>
           </Grid>
         </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <Button
+            type="button"
+            variant="text"
+            onClick={() => {
+              startAssistantConversation();
+            }}
+          >
+            Assistant IA
+          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              onClick={() => {
+                setOpen(false);
+                setMutationError(null);
+                setEditingPropertyId(null);
+                setForm({ name: '' });
+                setAssistantOpen(false);
+              }}
+            >
+              Annuler
+            </Button>
+            <Button
+              onClick={() => {
+                if (editingPropertyId) {
+                  updateMutation.mutate({ id: editingPropertyId, payload: form });
+                } else {
+                  createMutation.mutate(form);
+                }
+              }}
+              variant="contained"
+              disabled={isSavingProperty}
+            >
+              Enregistrer
+            </Button>
+          </Box>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={assistantOpen}
+        onClose={handleAssistantClose}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Assistant IA — Immeuble</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
+              Laisse-toi guider question par question. Tape «&nbsp;passer&nbsp;» si tu préfères remplir un champ plus
+              tard.
+            </Typography>
+            <Paper
+              variant="outlined"
+              sx={{ p: 2, maxHeight: 320, overflowY: 'auto', backgroundColor: 'grey.50' }}
+            >
+              <Stack spacing={1.5}>
+                {assistantMessages.map((message) => (
+                  <Box
+                    key={message.id}
+                    sx={{
+                      alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start',
+                      backgroundColor:
+                        message.role === 'user'
+                          ? 'primary.main'
+                          : message.role === 'summary'
+                          ? 'secondary.light'
+                          : 'grey.200',
+                      color: message.role === 'user' ? 'primary.contrastText' : 'text.primary',
+                      px: 2,
+                      py: 1,
+                      borderRadius: 2,
+                      maxWidth: '85%'
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                      {message.content}
+                    </Typography>
+                  </Box>
+                ))}
+                {!assistantMessages.length && (
+                  <Typography variant="body2" color="text.secondary">
+                    L'assistant est prêt à démarrer.
+                  </Typography>
+                )}
+                <Box ref={assistantScrollRef} />
+              </Stack>
+            </Paper>
+            {assistantCompleted && (
+              <Alert severity="success">
+                Vérifie le résumé ci-dessus, puis ferme l’assistant pour enregistrer l’immeuble.
+              </Alert>
+            )}
+            <Box
+              component="form"
+              onSubmit={handleAssistantSubmit}
+              sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}
+            >
+              <TextField
+                label="Ta réponse"
+                value={assistantInput}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setAssistantInput(event.target.value)}
+                autoFocus
+                disabled={assistantCompleted}
+                helperText={assistantCompleted ? "Tu peux fermer l’assistant." : undefined}
+              />
+              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Button type="submit" variant="contained" disabled={assistantCompleted}>
+                  Envoyer
+                </Button>
+                <Button type="button" onClick={handleAssistantSkip} disabled={assistantCompleted}>
+                  Passer
+                </Button>
+              </Stack>
+            </Box>
+          </Stack>
+        </DialogContent>
         <DialogActions>
-          <Button
-            onClick={() => {
-              setOpen(false);
-              setMutationError(null);
-              setEditingPropertyId(null);
-              setForm({ name: '' });
-            }}
-          >
-            Annuler
-          </Button>
-          <Button
-            onClick={() => {
-              if (editingPropertyId) {
-                updateMutation.mutate({ id: editingPropertyId, payload: form });
-              } else {
-                createMutation.mutate(form);
-              }
-            }}
-            variant="contained"
-            disabled={isSavingProperty}
-          >
-            Enregistrer
-          </Button>
+          <Button onClick={handleAssistantClose}>Fermer</Button>
         </DialogActions>
       </Dialog>
 
