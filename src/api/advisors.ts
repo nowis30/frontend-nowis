@@ -37,6 +37,8 @@ export interface AdvisorRecommendation {
 
 export type AdvisorEngineMode = 'heuristic' | 'gpt';
 
+export type AdvisorResponderId = 'fiscaliste' | 'comptable' | 'planificateur' | 'avocat' | 'group';
+
 export interface AdvisorResultEngine {
   mode: AdvisorEngineMode;
   isSimulated: boolean;
@@ -47,6 +49,18 @@ export interface AdvisorUncertaintyField {
   questionId: string;
   label: string;
   description?: string;
+}
+
+export interface AdvisorTargetedAnswer {
+  expertId: AdvisorResponderId;
+  answer: string;
+  keyPoints: string[];
+  followUps: string[];
+  metrics: AdvisorMetric[];
+  engine: {
+    mode: AdvisorEngineMode;
+    note?: string;
+  };
 }
 
 export interface AdvisorResult {
@@ -78,5 +92,16 @@ export async function evaluateAdvisors(
     { answers },
     options.engine ? { params: { engine: options.engine } } : undefined
   );
+  return response.data;
+}
+
+export interface AskAdvisorPayload {
+  expertId: AdvisorResponderId;
+  question: string;
+  answers: AdvisorAnswer[];
+}
+
+export async function askAdvisorQuestion(payload: AskAdvisorPayload): Promise<AdvisorTargetedAnswer> {
+  const response = await apiClient.post<AdvisorTargetedAnswer>('/advisors/ask', payload);
   return response.data;
 }

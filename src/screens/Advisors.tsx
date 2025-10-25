@@ -33,6 +33,8 @@ import {
   AdvisorMetric,
   AdvisorQuestion,
   AdvisorResult,
+  AdvisorResponderId,
+  askAdvisorQuestion,
   evaluateAdvisors,
   fetchAdvisorQuestions
 } from '../api/advisors';
@@ -44,6 +46,19 @@ interface ConversationEntry {
   meta?: { expertId?: string };
 }
 
+interface TargetedExchange {
+  id: string;
+  expertId: AdvisorResponderId;
+  expertLabel: string;
+  question: string;
+  answer: string;
+  keyPoints: string[];
+  followUps: string[];
+  metrics: AdvisorMetric[];
+  engineMode: AdvisorEngineMode;
+  engineNote?: string;
+}
+
 interface AdvisorsScreenProps {
   onUnauthorized?: () => void;
 }
@@ -52,7 +67,8 @@ const expertLabels: Record<string, string> = {
   fiscaliste: 'Fiscaliste',
   comptable: 'Comptable',
   planificateur: 'Planificateur financier',
-  avocat: 'Avocat corporatif'
+  avocat: 'Avocat corporatif',
+  group: 'Comite IA'
 };
 
 function isUnauthorizedError(error: unknown): boolean {
@@ -88,6 +104,11 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [formError, setFormError] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
   const [selectedMetric, setSelectedMetric] = useState<AdvisorMetric | null>(null);
+  const [targetExpert, setTargetExpert] = useState<AdvisorResponderId>('group');
+  const [targetQuestion, setTargetQuestion] = useState('');
+  const [targetError, setTargetError] = useState<string | null>(null);
+  const [targetLoading, setTargetLoading] = useState(false);
+  const [targetHistory, setTargetHistory] = useState<TargetedExchange[]>([]);
 
   const askedQuestionsRef = useRef(new Set<string>());
 
@@ -199,6 +220,74 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     } finally {
       setSubmitting(false);
       setInputValue('');
+    }
+  }
+
+  async function handleTargetedAsk(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (targetLoading) {
+      return;
+    }
+
+    const trimmed = targetQuestion.trim();
+    if (!trimmed) {
+      setTargetError('Formulez une question avant de soumettre.');
+      return;
+    }
+
+    setTargetError(null);
+    setTargetLoading(true);
+    try {
+      const response = await askAdvisorQuestion({
+        expertId: targetExpert,
+        question: trimmed,
+        answers
+      });
+
+      const responderLabel = expertLabels[response.expertId] ?? response.expertId;
+      setConversation((prev) => [
+        ...prev,
+        {
+          id: generateId('target-question'),
+          role: 'user',
+          content: `[${responderLabel}] ${trimmed}`
+        },
+        {
+          id: generateId('target-answer'),
+          role: 'system',
+          content: response.answer,
+          meta: { expertId: response.expertId === 'group' ? undefined : response.expertId }
+        }
+      ]);
+
+      const exchange: TargetedExchange = {
+        id: generateId('target-exchange'),
+        expertId: response.expertId,
+        expertLabel: responderLabel,
+        question: trimmed,
+        answer: response.answer,
+        keyPoints: response.keyPoints,
+        followUps: response.followUps,
+        metrics: response.metrics,
+        engineMode: response.engine.mode,
+        engineNote: response.engine.note
+      };
+
+      setTargetHistory((prev) => [exchange, ...prev].slice(0, 5));
+      setTargetQuestion('');
+    } catch (err) {
+      console.error('Targeted question failed', err);
+      if (isUnauthorizedError(err)) {
+        onUnauthorized?.();
+        setTargetError('Acces non autorise. Merci de verifier votre cle.');
+      } else if (axios.isAxiosError(err)) {
+        const serverMessage = (err.response?.data as { error?: string } | undefined)?.error;
+        setTargetError(serverMessage ?? 'Impossible de traiter cette question pour le moment.');
+      } else {
+        setTargetError('Impossible de traiter cette question pour le moment.');
+      }
+    } finally {
+      setTargetLoading(false);
     }
   }
 
@@ -381,6 +470,131 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           )}
         </Paper>
       </Stack>
+
+      <Paper elevation={3} sx={{ p: 3 }}>
+        <Stack spacing={2}>
+          <Typography variant="h5">Questions ciblees</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Choisissez un expert ou le comite IA pour obtenir une reponse ciblee basee sur vos reponses actuelles.
+          </Typography>
+          {targetError && <Alert severity="error">{targetError}</Alert>}
+          <Stack component="form" spacing={2} onSubmit={handleTargetedAsk}>
+            <TextField
+              select
+              label="Destinataire"
+              value={targetExpert}
+              onChange={(event) => setTargetExpert(event.target.value as AdvisorResponderId)}
+              helperText="Le comite IA combine les quatre experts."
+              required
+              fullWidth
+            >
+              {(['group', 'fiscaliste', 'comptable', 'planificateur', 'avocat'] as AdvisorResponderId[]).map((option) => (
+                <MenuItem key={option} value={option}>
+                  {expertLabels[option] ?? option}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="Votre question ciblee"
+              value={targetQuestion}
+              onChange={(event) => setTargetQuestion(event.target.value)}
+              multiline
+              minRows={2}
+              required
+              fullWidth
+              helperText="Precisez le contexte ou la decision a clarifier."
+            />
+            <Stack direction="row" spacing={2}>
+              <Button type="submit" variant="contained" disabled={targetLoading} startIcon={<QuestionAnswerIcon />}>
+                {targetLoading ? 'Analyse en cours...' : 'Obtenir une reponse ciblee'}
+              </Button>
+              <Button
+                type="button"
+                variant="text"
+                disabled={targetLoading}
+                onClick={() => {
+                  setTargetQuestion('');
+                  setTargetError(null);
+                }}
+              >
+                Effacer
+              </Button>
+            </Stack>
+          </Stack>
+
+          {targetHistory.length > 0 && (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {targetHistory.map((exchange) => (
+                <Paper key={exchange.id} variant="outlined" sx={{ p: 2 }}>
+                  <Stack spacing={1.5}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Chip label={exchange.expertLabel} color="primary" size="small" />
+                      <Chip
+                        label={exchange.engineMode === 'gpt' ? 'GPT' : 'Heuristique'}
+                        size="small"
+                        color={exchange.engineMode === 'gpt' ? 'secondary' : 'default'}
+                      />
+                      {exchange.engineNote && (
+                        <Typography variant="caption" color="text.secondary">
+                          {exchange.engineNote}
+                        </Typography>
+                      )}
+                    </Stack>
+                    <Typography variant="subtitle2">Question</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {exchange.question}
+                    </Typography>
+                    <Typography variant="subtitle2">Reponse</Typography>
+                    <Typography variant="body2">{exchange.answer}</Typography>
+                    {exchange.keyPoints.length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2">Points a retenir</Typography>
+                        <List dense>
+                          {exchange.keyPoints.map((point, index) => (
+                            <ListItem key={index} disableGutters>
+                              <ListItemIcon sx={{ minWidth: 32 }}>
+                                <TipsAndUpdatesIcon fontSize="small" color="action" />
+                              </ListItemIcon>
+                              <ListItemText primary={point} primaryTypographyProps={{ variant: 'body2' }} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Box>
+                    )}
+                    {exchange.followUps.length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2">Suivis proposes</Typography>
+                        <List dense>
+                          {exchange.followUps.map((item, index) => (
+                            <ListItem key={index} disableGutters>
+                              <ListItemIcon sx={{ minWidth: 32 }}>
+                                <TaskAltIcon color="success" />
+                              </ListItemIcon>
+                              <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2' }} />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Box>
+                    )}
+                    {exchange.metrics.length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2">Indicateurs associes</Typography>
+                        <Stack spacing={1}>
+                          {exchange.metrics.map((metric) => (
+                            <Typography key={metric.id} variant="body2">
+                              {metric.label}: {metric.value}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          )}
+        </Stack>
+      </Paper>
 
       {result?.completed && (
         <Stack spacing={4}>
