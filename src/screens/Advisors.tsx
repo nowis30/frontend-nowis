@@ -317,17 +317,35 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
                   ))}
                 </TextField>
               ) : (
-                <TextField
-                  label="Votre réponse"
-                  placeholder={currentQuestionDefinition.placeholder}
-                  type={currentQuestionDefinition.type === 'number' ? 'number' : 'text'}
-                  value={inputValue}
-                  onChange={(event) => setInputValue(event.target.value)}
-                  required
-                  fullWidth
-                  helperText={formError ?? currentQuestionDefinition.description}
-                  error={Boolean(formError)}
-                />
+                (() => {
+                  const isNumberQuestion = currentQuestionDefinition.type === 'number';
+                  const helperText =
+                    formError ??
+                    (isNumberQuestion
+                      ? "Inscrivez un montant estimé (ex. 250000) ou tapez 'je ne sais pas'."
+                      : currentQuestionDefinition.description);
+                  return (
+                    <TextField
+                      label="Votre réponse"
+                      placeholder={currentQuestionDefinition.placeholder}
+                      type="text"
+                      inputProps={
+                        isNumberQuestion
+                          ? {
+                              inputMode: 'decimal',
+                              'aria-label': 'Réponse numérique ou texte'
+                            }
+                          : undefined
+                      }
+                      value={inputValue}
+                      onChange={(event) => setInputValue(event.target.value)}
+                      required
+                      fullWidth
+                      helperText={helperText}
+                      error={Boolean(formError)}
+                    />
+                  );
+                })()
               )}
 
               <Button type="submit" variant="contained" disabled={submitting} startIcon={<QuestionAnswerIcon />}>
