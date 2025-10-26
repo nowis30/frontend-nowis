@@ -15,7 +15,6 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import { SelectChangeEvent } from '@mui/material/Select';
 import {
   Line,
   LineChart,
@@ -125,7 +124,7 @@ function FamilyWealthScreen() {
     }));
   };
 
-  const handleScenarioTypeChange = (event: SelectChangeEvent<string>) => {
+  const handleScenarioTypeChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const value = event.target.value as ScenarioFormState['scenarioType'];
     setScenarioForm((prev) => ({ ...prev, scenarioType: value }));
   };
