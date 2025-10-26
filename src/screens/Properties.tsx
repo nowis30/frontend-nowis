@@ -67,6 +67,7 @@ import {
 } from '../api/attachments';
 import type { ExpensePayload, ExpenseDto } from '../api/expenses';
 import { downloadBlob } from '../utils/download';
+import { useNotification } from '../components/NotificationProvider';
 
 const EXPENSE_CATEGORY_SUGGESTIONS = [
   'Entretien',
@@ -269,10 +270,12 @@ function useProperties() {
 
 function PropertiesScreen() {
   const queryClient = useQueryClient();
+  const { notify } = useNotification();
   const { data, isLoading } = useProperties();
   const { data: summary, isLoading: isSummaryLoading } = useSummary();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<PropertyPayload>({ name: '' });
+  const [propertyFieldErrors, setPropertyFieldErrors] = useState<Partial<Record<PropertyFieldKey, string>>>({});
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
@@ -315,9 +318,11 @@ function PropertiesScreen() {
   const [unitForm, setUnitForm] = useState<UnitFormState>(createEmptyUnitForm());
   const [editingUnitId, setEditingUnitId] = useState<number | null>(null);
   const [unitError, setUnitError] = useState<string | null>(null);
+  const [unitFieldErrors, setUnitFieldErrors] = useState<Partial<Record<keyof UnitFormState, string>>>({});
   const [mortgageForm, setMortgageForm] = useState<MortgageFormState>(createEmptyMortgageForm());
   const [editingMortgageId, setEditingMortgageId] = useState<number | null>(null);
   const [mortgageError, setMortgageError] = useState<string | null>(null);
+  const [mortgageFieldErrors, setMortgageFieldErrors] = useState<Partial<Record<keyof MortgageFormState, string>>>({});
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentInfo, setAttachmentInfo] = useState<string | null>(null);
   const [mobileQrOpen, setMobileQrOpen] = useState(false);
@@ -398,9 +403,11 @@ function PropertiesScreen() {
       }
       setAttachmentInfo('Lien mobile copié dans le presse-papiers.');
       setAttachmentError(null);
+      notify('Lien mobile copié dans le presse-papiers.', 'success');
     } catch (error) {
       console.error('Clipboard copy failed', error);
       setAttachmentError('Impossible de copier le lien automatiquement.');
+      notify('Impossible de copier le lien automatiquement.', 'error');
     }
   };
 
@@ -413,13 +420,18 @@ function PropertiesScreen() {
       setForm({ name: '' });
       setMutationError(null);
       setEditingPropertyId(null);
+      setPropertyFieldErrors({});
+      notify('Immeuble enregistré.', 'success');
     },
     onError: (error: unknown) => {
       const message =
         error && typeof error === 'object' && 'response' in error && error.response
           ? (error as { response?: { data?: { error?: string } } }).response?.data?.error
           : null;
-      setMutationError(message ?? "Impossible d'enregistrer l'immeuble. Réessaie.");
+      const fallback = "Impossible d'enregistrer l'immeuble. Réessaie.";
+      const resolved = message ?? fallback;
+      setMutationError(resolved);
+      notify(resolved, 'error');
     }
   });
 
@@ -428,6 +440,11 @@ function PropertiesScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['properties'] });
       queryClient.invalidateQueries({ queryKey: ['summary'] });
+      notify('Immeuble supprimé.', 'success');
+    },
+    onError: (error: unknown) => {
+      const resolved = getApiErrorMessage(error, 'Suppression impossible pour le moment.');
+      notify(resolved, 'error');
     }
   });
 
@@ -441,13 +458,18 @@ function PropertiesScreen() {
       setForm({ name: '' });
       setMutationError(null);
       setEditingPropertyId(null);
+      setPropertyFieldErrors({});
+      notify('Immeuble mis à jour.', 'success');
     },
     onError: (error: unknown) => {
       const message =
         error && typeof error === 'object' && 'response' in error && error.response
           ? (error as { response?: { data?: { error?: string } } }).response?.data?.error
           : null;
-      setMutationError(message ?? "Impossible d'enregistrer l'immeuble. Réessaie.");
+      const fallback = "Impossible d'enregistrer l'immeuble. Réessaie.";
+      const resolved = message ?? fallback;
+      setMutationError(resolved);
+      notify(resolved, 'error');
     }
   });
 
@@ -834,6 +856,7 @@ function PropertiesScreen() {
           : null
       );
       setExtractionDialogOpen(true);
+      notify('Extraction des données complétée.', 'success');
     },
     onError: (error: unknown) => {
       const message = getApiErrorMessage(error, 'Extraction impossible pour le moment.');
@@ -841,6 +864,7 @@ function PropertiesScreen() {
       setAttachmentInfo(null);
       setExtractionAttachment(null);
       setExtractionConfidence(null);
+      notify(message, 'error');
     }
   });
 
@@ -862,9 +886,12 @@ function PropertiesScreen() {
         queryClient.invalidateQueries({ queryKey: ['attachments', mortgagesContext.id] });
       }
       setAttachmentError(null);
+      notify('Document téléversé.', 'success');
     },
     onError: (error: unknown) => {
-      setAttachmentError(getApiErrorMessage(error, "Échec de l'envoi du fichier."));
+      const message = getApiErrorMessage(error, "Échec de l'envoi du fichier.");
+      setAttachmentError(message);
+      notify(message, 'error');
     }
   });
 
@@ -881,9 +908,12 @@ function PropertiesScreen() {
         queryClient.invalidateQueries({ queryKey: ['attachments', mortgagesContext.id] });
       }
       setAttachmentError(null);
+      notify('Document supprimé.', 'success');
     },
     onError: (error: unknown) => {
-      setAttachmentError(getApiErrorMessage(error, 'Suppression impossible pour le moment.'));
+      const message = getApiErrorMessage(error, 'Suppression impossible pour le moment.');
+      setAttachmentError(message);
+      notify(message, 'error');
     }
   });
 
@@ -906,7 +936,9 @@ function PropertiesScreen() {
       setDownloadingAttachmentId(null);
     },
     onError: (error: unknown) => {
-      setAttachmentError(getApiErrorMessage(error, 'Téléchargement impossible pour le moment.'));
+      const message = getApiErrorMessage(error, 'Téléchargement impossible pour le moment.');
+      setAttachmentError(message);
+      notify(message, 'error');
       setDownloadingAttachmentId(null);
     }
   });
@@ -928,9 +960,12 @@ function PropertiesScreen() {
       setExtractionForm({ label: '', category: '', amount: '', startDate: '' });
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['summary'] });
+      notify('Dépense enregistrée à partir du document.', 'success');
     },
     onError: (error: unknown) => {
-      setExtractionError(getApiErrorMessage(error, "Impossible de créer la dépense."));
+      const message = getApiErrorMessage(error, "Impossible de créer la dépense.");
+      setExtractionError(message);
+      notify(message, 'error');
     }
   });
 
@@ -1096,6 +1131,7 @@ function PropertiesScreen() {
     setUnitForm(createEmptyUnitForm());
     setEditingUnitId(null);
     setUnitError(null);
+    setUnitFieldErrors({});
     setUnitDialogOpen(true);
   };
 
@@ -1105,10 +1141,12 @@ function PropertiesScreen() {
     setUnitForm(createEmptyUnitForm());
     setEditingUnitId(null);
     setUnitError(null);
+    setUnitFieldErrors({});
   };
 
   const handleEditUnit = (unit: PropertyUnitDto) => {
     setUnitError(null);
+    setUnitFieldErrors({});
     setEditingUnitId(unit.id);
     setUnitForm({
       label: unit.label,
@@ -1134,8 +1172,15 @@ function PropertiesScreen() {
     deleteUnit.mutate(
       { propertyId: unitsContext.id, unitId: unit.id },
       {
+        onSuccess: () => {
+          setUnitError(null);
+          setUnitFieldErrors({});
+          notify('Unité supprimée.', 'success');
+        },
         onError: (error: unknown) => {
-          setUnitError(getApiErrorMessage(error, "Suppression impossible pour le moment."));
+          const message = getApiErrorMessage(error, "Suppression impossible pour le moment.");
+          setUnitError(message);
+          notify(message, 'error');
         }
       }
     );
@@ -1147,50 +1192,62 @@ function PropertiesScreen() {
     }
 
     const label = unitForm.label.trim();
-    if (!label) {
-      setUnitError("Le nom de l'unité est requis.");
-      return;
-    }
-
     const squareFeetRaw = unitForm.squareFeet.trim();
     const rentExpectedRaw = unitForm.rentExpected.trim();
+
+    const fieldErrors: Partial<Record<keyof UnitFormState, string>> = {};
+
+    if (!label) {
+      fieldErrors.label = "Le nom de l'unité est requis.";
+    }
 
     let squareFeet: number | null = null;
     if (squareFeetRaw.length > 0) {
       const parsed = Number(squareFeetRaw);
       if (!Number.isFinite(parsed) || parsed < 0) {
-        setUnitError('La superficie doit être un nombre positif ou vide.');
-        return;
+        fieldErrors.squareFeet = 'La superficie doit être un nombre positif ou vide.';
+      } else {
+        squareFeet = parsed;
       }
-
-      squareFeet = parsed;
     }
 
     let rentExpected: number | null = null;
     if (rentExpectedRaw.length > 0) {
       const parsed = Number(rentExpectedRaw);
       if (!Number.isFinite(parsed) || parsed < 0) {
-        setUnitError('Le loyer attendu doit être un nombre positif ou vide.');
-        return;
+        fieldErrors.rentExpected = 'Le loyer attendu doit être un nombre positif ou vide.';
+      } else {
+        rentExpected = parsed;
       }
-
-      rentExpected = parsed;
     }
 
+    if (Object.keys(fieldErrors).length > 0) {
+      setUnitFieldErrors(fieldErrors);
+      setUnitError(null);
+      return;
+    }
+
+    setUnitFieldErrors({});
     const payload = {
       label,
       squareFeet,
       rentExpected
     };
 
+    const wasEditing = Boolean(editingUnitId);
     const onSuccess = () => {
       setUnitForm(createEmptyUnitForm());
       setEditingUnitId(null);
       setUnitError(null);
+      setUnitFieldErrors({});
+      notify(wasEditing ? 'Unité mise à jour.' : 'Unité ajoutée.', 'success');
     };
 
     const onError = (error: unknown) => {
-      setUnitError(getApiErrorMessage(error, "Impossible d'enregistrer l'unité."));
+      const message = getApiErrorMessage(error, "Impossible d'enregistrer l'unité.");
+      setUnitError(message);
+      setUnitFieldErrors({});
+      notify(message, 'error');
     };
 
     if (editingUnitId) {
@@ -1207,6 +1264,7 @@ function PropertiesScreen() {
     setEditingUnitId(null);
     setUnitForm(createEmptyUnitForm());
     setUnitError(null);
+    setUnitFieldErrors({});
   };
 
   const handleOpenMortgageDialog = (property: PropertyDto) => {
@@ -1214,6 +1272,7 @@ function PropertiesScreen() {
     setMortgageForm(createEmptyMortgageForm());
     setEditingMortgageId(null);
     setMortgageError(null);
+    setMortgageFieldErrors({});
     setMortgageDialogOpen(true);
   };
 
@@ -1226,10 +1285,12 @@ function PropertiesScreen() {
     setDebouncedPreviewInput(null);
     setAttachmentError(null);
     setAttachmentFilter('all');
+    setMortgageFieldErrors({});
   };
 
   const handleEditMortgage = (mortgage: PropertyMortgageDto) => {
     setMortgageError(null);
+    setMortgageFieldErrors({});
     setEditingMortgageId(mortgage.id);
     setMortgageForm({
       lender: mortgage.lender,
@@ -1255,8 +1316,15 @@ function PropertiesScreen() {
     deleteMortgage.mutate(
       { propertyId: mortgagesContext.id, mortgageId: mortgage.id },
       {
+        onSuccess: () => {
+          setMortgageError(null);
+          setMortgageFieldErrors({});
+          notify('Hypothèque supprimée.', 'success');
+        },
         onError: (error: unknown) => {
-          setMortgageError(getApiErrorMessage(error, 'Suppression impossible pour le moment.'));
+          const message = getApiErrorMessage(error, 'Suppression impossible pour le moment.');
+          setMortgageError(message);
+          notify(message, 'error');
         }
       }
     );
@@ -1267,98 +1335,133 @@ function PropertiesScreen() {
       return;
     }
 
+    const fieldErrors: Partial<Record<keyof MortgageFormState, string>> = {};
+
     const lender = mortgageForm.lender.trim();
     if (!lender) {
-      setMortgageError('Le prêteur est requis.');
-      return;
+      fieldErrors.lender = 'Le prêteur est requis.';
     }
 
-    const parsePositiveNumber = (
-      value: string,
-      fieldLabel: string,
-      allowZero = false,
-      requireInteger = false
+    const parseNumberField = (
+      rawValue: string,
+      field: keyof MortgageFormState,
+      labels: { required: string; positive: string; integer?: string },
+      options: { allowZero?: boolean; requireInteger?: boolean } = {}
     ) => {
-      const trimmed = value.trim();
+      const trimmed = rawValue.trim();
       if (!trimmed) {
-        setMortgageError(`${fieldLabel} est requis.`);
+        fieldErrors[field] = labels.required;
         return null;
       }
 
       const parsed = Number(trimmed);
+      const allowZero = options.allowZero ?? false;
       if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
-        setMortgageError(`${fieldLabel} doit être un nombre positif.`);
+        fieldErrors[field] = labels.positive;
         return null;
       }
 
-      if (requireInteger && !Number.isInteger(parsed)) {
-        setMortgageError(`${fieldLabel} doit être un nombre entier.`);
+      if (options.requireInteger && !Number.isInteger(parsed)) {
+        fieldErrors[field] = labels.integer ?? labels.positive;
         return null;
       }
 
       return parsed;
     };
 
-    const principal = parsePositiveNumber(mortgageForm.principal, 'Le capital');
-    if (principal === null) {
-      return;
-    }
+    const principal = parseNumberField(
+      mortgageForm.principal,
+      'principal',
+      {
+        required: 'Le capital est requis.',
+        positive: 'Le capital doit être un nombre positif.'
+      }
+    );
 
-  const ratePercentValue = parsePositiveNumber(mortgageForm.ratePercent, 'Le taux', true);
-    if (ratePercentValue === null) {
-      return;
-    }
+    const ratePercentValue = parseNumberField(
+      mortgageForm.ratePercent,
+      'ratePercent',
+      {
+        required: 'Le taux est requis.',
+        positive: 'Le taux doit être un nombre positif ou nul.'
+      },
+      { allowZero: true }
+    );
 
-    const termMonths = parsePositiveNumber(mortgageForm.termMonths, 'La durée (mois)', false, true);
-    if (termMonths === null) {
-      return;
-    }
+    const termMonths = parseNumberField(
+      mortgageForm.termMonths,
+      'termMonths',
+      {
+        required: 'La durée (mois) est requise.',
+        positive: 'La durée (mois) doit être un nombre positif.',
+        integer: 'La durée (mois) doit être un nombre entier.'
+      },
+      { requireInteger: true }
+    );
 
-    const amortizationMonths = parsePositiveNumber(
+    const amortizationMonths = parseNumberField(
       mortgageForm.amortizationMonths,
-      "L'amortissement (mois)",
-      false,
-      true
+      'amortizationMonths',
+      {
+        required: "L'amortissement (mois) est requis.",
+        positive: "L'amortissement (mois) doit être un nombre positif.",
+        integer: "L'amortissement (mois) doit être un nombre entier."
+      },
+      { requireInteger: true }
     );
-    if (amortizationMonths === null) {
-      return;
-    }
 
-    const paymentFrequency = parsePositiveNumber(
+    const paymentFrequency = parseNumberField(
       mortgageForm.paymentFrequency,
-      'La fréquence des paiements',
-      false,
-      true
+      'paymentFrequency',
+      {
+        required: 'La fréquence des paiements est requise.',
+        positive: 'La fréquence des paiements doit être un nombre positif.',
+        integer: 'La fréquence des paiements doit être un nombre entier.'
+      },
+      { requireInteger: true }
     );
-    if (paymentFrequency === null) {
+
+    const startDate = mortgageForm.startDate.trim();
+    if (!startDate) {
+      fieldErrors.startDate = 'La date de début est requise.';
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      setMortgageFieldErrors(fieldErrors);
+      setMortgageError(null);
       return;
     }
 
-    const startDate = mortgageForm.startDate;
-    if (!startDate) {
-      setMortgageError('La date de début est requise.');
-      return;
-    }
+    setMortgageFieldErrors({});
 
     const payload = {
       lender,
-      principal,
-      rateAnnual: ratePercentValue / 100,
-      termMonths,
-      amortizationMonths,
+      principal: principal as number,
+      rateAnnual: (ratePercentValue as number) / 100,
+      termMonths: termMonths as number,
+      amortizationMonths: amortizationMonths as number,
       startDate,
-      paymentFrequency
+      paymentFrequency: paymentFrequency as number
     };
 
+    const wasEditingMortgage = Boolean(editingMortgageId);
     const onSuccess = () => {
       setMortgageForm(createEmptyMortgageForm());
       setEditingMortgageId(null);
       setMortgageError(null);
       setDebouncedPreviewInput(null);
+      setMortgageFieldErrors({});
+      notify(
+        wasEditingMortgage ? 'Hypothèque mise à jour.' : 'Hypothèque ajoutée.',
+        'success'
+      );
     };
 
     const onError = (error: unknown) => {
-      setMortgageError(getApiErrorMessage(error, "Impossible d'enregistrer l'hypothèque."));
+      const message = getApiErrorMessage(error, "Impossible d'enregistrer l'hypothèque.");
+      setMortgageError(message);
+      setMortgageFieldErrors({});
+      notify(message, 'error');
     };
 
     if (editingMortgageId) {
@@ -1377,6 +1480,7 @@ function PropertiesScreen() {
     setMortgageError(null);
     setDebouncedPreviewInput(null);
     setAttachmentError(null);
+    setMortgageFieldErrors({});
   };
 
   const handleAttachmentFilterChange = (value: AttachmentFilterValue) => {
@@ -1430,6 +1534,86 @@ function PropertiesScreen() {
     downloadAttachmentMutation.mutate(attachment);
   };
 
+  const validatePropertyForm = (): PropertyPayload | null => {
+    const errors: Partial<Record<PropertyFieldKey, string>> = {};
+
+    const trimmedName = form.name.trim();
+    if (!trimmedName) {
+      errors.name = 'Le nom est requis.';
+    }
+
+    const trimmedAddress = form.address?.trim() ?? '';
+    const trimmedNotes = form.notes?.trim() ?? '';
+    const rawAcquisitionDate = form.acquisitionDate?.trim() ?? '';
+    let normalizedAcquisitionDate: string | undefined;
+    if (rawAcquisitionDate) {
+      const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
+      if (!isoPattern.test(rawAcquisitionDate)) {
+        errors.acquisitionDate = 'Format attendu AAAA-MM-JJ.';
+      } else {
+        normalizedAcquisitionDate = rawAcquisitionDate;
+      }
+    }
+
+    const sanitizeAmount = (
+      value: number | undefined,
+      key: Extract<PropertyFieldKey, 'currentValue' | 'purchasePrice'>,
+      label: string
+    ) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        errors[key] = `${label} doit être un nombre valide.`;
+        return undefined;
+      }
+      if (value < 0) {
+        errors[key] = `${label} doit être positive ou nulle.`;
+        return undefined;
+      }
+      return value;
+    };
+
+    const sanitizedCurrentValue = sanitizeAmount(form.currentValue, 'currentValue', 'La valeur actuelle');
+    const sanitizedPurchasePrice = sanitizeAmount(form.purchasePrice, 'purchasePrice', 'Le prix payé');
+
+    if (Object.keys(errors).length > 0) {
+      setPropertyFieldErrors(errors);
+      setMutationError(null);
+      notify("Corrige les champs de l'immeuble.", 'error');
+      return null;
+    }
+
+    setPropertyFieldErrors({});
+    setMutationError(null);
+
+    const payload: PropertyPayload = {
+      name: trimmedName,
+      address: trimmedAddress.length > 0 ? trimmedAddress : undefined,
+      acquisitionDate: normalizedAcquisitionDate,
+      currentValue: sanitizedCurrentValue,
+      purchasePrice: sanitizedPurchasePrice,
+      notes: trimmedNotes.length > 0 ? trimmedNotes : undefined
+    };
+
+    setForm(payload);
+
+    return payload;
+  };
+
+  const handleSaveProperty = () => {
+    const payload = validatePropertyForm();
+    if (!payload) {
+      return;
+    }
+
+    if (editingPropertyId) {
+      updateMutation.mutate({ id: editingPropertyId, payload });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -1440,6 +1624,7 @@ function PropertiesScreen() {
             setMutationError(null);
             setEditingPropertyId(null);
             setForm({ name: '' });
+            setPropertyFieldErrors({});
             setOpen(true);
           }}
         >
@@ -1515,6 +1700,7 @@ function PropertiesScreen() {
                           onClick={() => {
                             setMutationError(null);
                             setEditingPropertyId(property.id);
+                            setPropertyFieldErrors({});
                             const acquisitionDateValue = property.acquisitionDate as unknown;
                             const normalizedAcquisitionDate =
                               typeof acquisitionDateValue === 'string'
@@ -1623,6 +1809,7 @@ function PropertiesScreen() {
           setEditingPropertyId(null);
           setForm({ name: '' });
           setAssistantOpen(false);
+          setPropertyFieldErrors({});
         }}
         fullWidth
       >
@@ -1640,9 +1827,20 @@ function PropertiesScreen() {
                 fullWidth
                 required
                 value={form.name}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setForm((prev: PropertyPayload) => ({ ...prev, name: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setForm((prev: PropertyPayload) => ({ ...prev, name: value }));
+                  setPropertyFieldErrors((prev) => {
+                    if (!prev.name) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.name;
+                    return next;
+                  });
+                }}
+                error={Boolean(propertyFieldErrors.name)}
+                helperText={propertyFieldErrors.name}
               />
             </Grid>
             <Grid item xs={12}>
@@ -1655,33 +1853,77 @@ function PropertiesScreen() {
                 }
               />
             </Grid>
-            <Grid item xs={6}>
+            <Grid item xs={12}>
               <TextField
                 label="Date d'acquisition"
                 type="date"
                 fullWidth
                 InputLabelProps={{ shrink: true }}
                 value={form.acquisitionDate ?? ''}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setForm((prev: PropertyPayload) => ({
-                    ...prev,
-                    acquisitionDate: event.target.value
-                  }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setForm((prev: PropertyPayload) => ({ ...prev, acquisitionDate: value }));
+                  setPropertyFieldErrors((prev) => {
+                    if (!prev.acquisitionDate) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.acquisitionDate;
+                    return next;
+                  });
+                }}
+                error={Boolean(propertyFieldErrors.acquisitionDate)}
+                helperText={propertyFieldErrors.acquisitionDate}
               />
             </Grid>
-            <Grid item xs={6}>
+            <Grid item xs={12} sm={6}>
               <TextField
                 label="Valeur actuelle"
                 type="number"
                 fullWidth
                 value={form.currentValue ?? ''}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
                   setForm((prev: PropertyPayload) => ({
                     ...prev,
-                    currentValue: Number(event.target.value)
-                  }))
-                }
+                    currentValue: value === '' ? undefined : Number(value)
+                  }));
+                  setPropertyFieldErrors((prev) => {
+                    if (!prev.currentValue) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.currentValue;
+                    return next;
+                  });
+                }}
+                error={Boolean(propertyFieldErrors.currentValue)}
+                helperText={propertyFieldErrors.currentValue}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Prix payé"
+                type="number"
+                fullWidth
+                value={form.purchasePrice ?? ''}
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setForm((prev: PropertyPayload) => ({
+                    ...prev,
+                    purchasePrice: value === '' ? undefined : Number(value)
+                  }));
+                  setPropertyFieldErrors((prev) => {
+                    if (!prev.purchasePrice) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.purchasePrice;
+                    return next;
+                  });
+                }}
+                error={Boolean(propertyFieldErrors.purchasePrice)}
+                helperText={propertyFieldErrors.purchasePrice}
               />
             </Grid>
             <Grid item xs={12}>
@@ -1699,13 +1941,7 @@ function PropertiesScreen() {
           </Grid>
         </DialogContent>
         <DialogActions sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button
-            type="button"
-            variant="text"
-            onClick={() => {
-              startAssistantConversation();
-            }}
-          >
+          <Button type="button" onClick={startAssistantConversation}>
             Assistant IA
           </Button>
           <Box sx={{ display: 'flex', gap: 1 }}>
@@ -1716,18 +1952,13 @@ function PropertiesScreen() {
                 setEditingPropertyId(null);
                 setForm({ name: '' });
                 setAssistantOpen(false);
+                setPropertyFieldErrors({});
               }}
             >
               Annuler
             </Button>
             <Button
-              onClick={() => {
-                if (editingPropertyId) {
-                  updateMutation.mutate({ id: editingPropertyId, payload: form });
-                } else {
-                  createMutation.mutate(form);
-                }
-              }}
+              onClick={handleSaveProperty}
               variant="contained"
               disabled={isSavingProperty}
             >
@@ -1898,9 +2129,20 @@ function PropertiesScreen() {
                 required
                 value={unitForm.label}
                 disabled={isUnitSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setUnitForm((prev) => ({ ...prev, label: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setUnitForm((prev) => ({ ...prev, label: value }));
+                  setUnitFieldErrors((prev) => {
+                    if (!prev.label) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.label;
+                    return next;
+                  });
+                }}
+                error={Boolean(unitFieldErrors.label)}
+                helperText={unitFieldErrors.label}
               />
             </Grid>
             <Grid item xs={12} sm={3}>
@@ -1910,9 +2152,20 @@ function PropertiesScreen() {
                 fullWidth
                 value={unitForm.squareFeet}
                 disabled={isUnitSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setUnitForm((prev) => ({ ...prev, squareFeet: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setUnitForm((prev) => ({ ...prev, squareFeet: value }));
+                  setUnitFieldErrors((prev) => {
+                    if (!prev.squareFeet) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.squareFeet;
+                    return next;
+                  });
+                }}
+                error={Boolean(unitFieldErrors.squareFeet)}
+                helperText={unitFieldErrors.squareFeet}
               />
             </Grid>
             <Grid item xs={12} sm={3}>
@@ -1922,9 +2175,20 @@ function PropertiesScreen() {
                 fullWidth
                 value={unitForm.rentExpected}
                 disabled={isUnitSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setUnitForm((prev) => ({ ...prev, rentExpected: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setUnitForm((prev) => ({ ...prev, rentExpected: value }));
+                  setUnitFieldErrors((prev) => {
+                    if (!prev.rentExpected) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.rentExpected;
+                    return next;
+                  });
+                }}
+                error={Boolean(unitFieldErrors.rentExpected)}
+                helperText={unitFieldErrors.rentExpected}
               />
             </Grid>
           </Grid>
@@ -2331,9 +2595,20 @@ function PropertiesScreen() {
                 required
                 value={mortgageForm.lender}
                 disabled={isMortgageSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMortgageForm((prev) => ({ ...prev, lender: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setMortgageForm((prev) => ({ ...prev, lender: value }));
+                  setMortgageFieldErrors((prev) => {
+                    if (!prev.lender) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.lender;
+                    return next;
+                  });
+                }}
+                error={Boolean(mortgageFieldErrors.lender)}
+                helperText={mortgageFieldErrors.lender}
               />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -2344,9 +2619,20 @@ function PropertiesScreen() {
                 required
                 value={mortgageForm.principal}
                 disabled={isMortgageSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMortgageForm((prev) => ({ ...prev, principal: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setMortgageForm((prev) => ({ ...prev, principal: value }));
+                  setMortgageFieldErrors((prev) => {
+                    if (!prev.principal) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.principal;
+                    return next;
+                  });
+                }}
+                error={Boolean(mortgageFieldErrors.principal)}
+                helperText={mortgageFieldErrors.principal}
               />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -2357,10 +2643,22 @@ function PropertiesScreen() {
                 required
                 value={mortgageForm.ratePercent}
                 disabled={isMortgageSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMortgageForm((prev) => ({ ...prev, ratePercent: event.target.value }))
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setMortgageForm((prev) => ({ ...prev, ratePercent: value }));
+                  setMortgageFieldErrors((prev) => {
+                    if (!prev.ratePercent) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.ratePercent;
+                    return next;
+                  });
+                }}
+                error={Boolean(mortgageFieldErrors.ratePercent)}
+                helperText={
+                  mortgageFieldErrors.ratePercent ?? 'Ex: 4.25 pour 4,25%'
                 }
-                helperText="Ex: 4.25 pour 4,25%"
               />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -2371,9 +2669,20 @@ function PropertiesScreen() {
                 required
                 value={mortgageForm.termMonths}
                 disabled={isMortgageSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMortgageForm((prev) => ({ ...prev, termMonths: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setMortgageForm((prev) => ({ ...prev, termMonths: value }));
+                  setMortgageFieldErrors((prev) => {
+                    if (!prev.termMonths) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.termMonths;
+                    return next;
+                  });
+                }}
+                error={Boolean(mortgageFieldErrors.termMonths)}
+                helperText={mortgageFieldErrors.termMonths}
               />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -2384,9 +2693,20 @@ function PropertiesScreen() {
                 required
                 value={mortgageForm.amortizationMonths}
                 disabled={isMortgageSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMortgageForm((prev) => ({ ...prev, amortizationMonths: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setMortgageForm((prev) => ({ ...prev, amortizationMonths: value }));
+                  setMortgageFieldErrors((prev) => {
+                    if (!prev.amortizationMonths) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.amortizationMonths;
+                    return next;
+                  });
+                }}
+                error={Boolean(mortgageFieldErrors.amortizationMonths)}
+                helperText={mortgageFieldErrors.amortizationMonths}
               />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -2397,9 +2717,20 @@ function PropertiesScreen() {
                 required
                 value={mortgageForm.paymentFrequency}
                 disabled={isMortgageSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMortgageForm((prev) => ({ ...prev, paymentFrequency: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setMortgageForm((prev) => ({ ...prev, paymentFrequency: value }));
+                  setMortgageFieldErrors((prev) => {
+                    if (!prev.paymentFrequency) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.paymentFrequency;
+                    return next;
+                  });
+                }}
+                error={Boolean(mortgageFieldErrors.paymentFrequency)}
+                helperText={mortgageFieldErrors.paymentFrequency}
               />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -2411,9 +2742,20 @@ function PropertiesScreen() {
                 InputLabelProps={{ shrink: true }}
                 value={mortgageForm.startDate}
                 disabled={isMortgageSaving}
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  setMortgageForm((prev) => ({ ...prev, startDate: event.target.value }))
-                }
+                onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                  const { value } = event.target;
+                  setMortgageForm((prev) => ({ ...prev, startDate: value }));
+                  setMortgageFieldErrors((prev) => {
+                    if (!prev.startDate) {
+                      return prev;
+                    }
+                    const next = { ...prev };
+                    delete next.startDate;
+                    return next;
+                  });
+                }}
+                error={Boolean(mortgageFieldErrors.startDate)}
+                helperText={mortgageFieldErrors.startDate}
               />
             </Grid>
           </Grid>

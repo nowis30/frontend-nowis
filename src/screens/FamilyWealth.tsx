@@ -36,6 +36,7 @@ import {
   type StressTestPayload,
   type StressTestResultDto
 } from '../api/wealth';
+import { useNotification } from '../components/NotificationProvider';
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('fr-CA', {
@@ -79,6 +80,17 @@ function FamilyWealthScreen() {
   const createScenario = useCreateFamilyWealthScenario();
   const deleteScenario = useDeleteFamilyWealthScenario();
   const runStressTest = useRunFamilyWealthStressTest();
+  const { notify } = useNotification();
+
+  const getApiErrorMessage = (error: unknown, fallback: string) => {
+    if (error && typeof error === 'object' && 'response' in error && error.response) {
+      const message = (error as { response?: { data?: { error?: string } } }).response?.data?.error;
+      if (message) {
+        return message;
+      }
+    }
+    return fallback;
+  };
 
   const [scenarioForm, setScenarioForm] = useState<ScenarioFormState>({
     label: 'Croissance 6 %',
@@ -90,12 +102,14 @@ function FamilyWealthScreen() {
     annualWithdrawal: 0,
     persist: true
   });
+  const [scenarioErrors, setScenarioErrors] = useState<Partial<Record<keyof ScenarioFormState, string>>>({});
 
   const [stressForm, setStressForm] = useState<StressFormState>({
     propertyValueShockPercent: -10,
     marketShockPercent: -8,
     interestRateShockPercent: 2
   });
+  const [stressErrors, setStressErrors] = useState<Partial<Record<keyof StressFormState, string>>>({});
 
   const [stressResult, setStressResult] = useState<StressTestResultDto | null>(null);
 
@@ -122,11 +136,27 @@ function FamilyWealthScreen() {
       ...prev,
       [field]: (Number.isNaN(nextValue) ? prev[field] : nextValue) as ScenarioFormState[Field]
     }));
+    setScenarioErrors((prev) => {
+      if (!prev[field]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   };
 
   const handleScenarioTypeChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const value = event.target.value as ScenarioFormState['scenarioType'];
     setScenarioForm((prev) => ({ ...prev, scenarioType: value }));
+    setScenarioErrors((prev) => {
+      if (!prev.scenarioType) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next.scenarioType;
+      return next;
+    });
   };
 
   const handleScenarioPersistChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -138,24 +168,121 @@ function FamilyWealthScreen() {
   ) => {
     const numericValue = Number(event.target.value);
     setStressForm((prev) => ({ ...prev, [field]: Number.isNaN(numericValue) ? prev[field] : numericValue }));
+    setStressErrors((prev) => {
+      if (!prev[field]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validateScenarioForm = () => {
+    const errors: Partial<Record<keyof ScenarioFormState, string>> = {};
+
+    if (!scenarioForm.label.trim()) {
+      errors.label = 'Nom du scénario requis.';
+    }
+
+    if (!Number.isFinite(scenarioForm.horizonYears) || scenarioForm.horizonYears < 1 || scenarioForm.horizonYears > 50) {
+      errors.horizonYears = 'Horizon entre 1 et 50 ans.';
+    }
+
+    if (!Number.isFinite(scenarioForm.growthRatePercent) || scenarioForm.growthRatePercent < -100 || scenarioForm.growthRatePercent > 100) {
+      errors.growthRatePercent = 'Rendement entre -100 % et 100 %.';
+    }
+
+    if (!Number.isFinite(scenarioForm.drawdownPercent) || scenarioForm.drawdownPercent < 0 || scenarioForm.drawdownPercent > 100) {
+      errors.drawdownPercent = 'Choc entre 0 % et 100 %.';
+    }
+
+    if (!Number.isFinite(scenarioForm.annualContribution) || Math.abs(scenarioForm.annualContribution) > 1_000_000) {
+      errors.annualContribution = 'Contribution entre -1 000 000 $ et 1 000 000 $.';
+    }
+
+    if (!Number.isFinite(scenarioForm.annualWithdrawal) || Math.abs(scenarioForm.annualWithdrawal) > 1_000_000) {
+      errors.annualWithdrawal = 'Retrait entre -1 000 000 $ et 1 000 000 $.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setScenarioErrors(errors);
+      notify('Corrige les champs du scénario.', 'error');
+      return false;
+    }
+
+    setScenarioErrors({});
+    return true;
+  };
+
+  const validateStressForm = () => {
+    const errors: Partial<Record<keyof StressFormState, string>> = {};
+
+    const withinRange = (value: number, min: number, max: number) => Number.isFinite(value) && value >= min && value <= max;
+
+    if (!withinRange(stressForm.propertyValueShockPercent, -100, 100)) {
+      errors.propertyValueShockPercent = 'Entre -100 % et 100 %.';
+    }
+
+    if (!withinRange(stressForm.marketShockPercent, -100, 100)) {
+      errors.marketShockPercent = 'Entre -100 % et 100 %.';
+    }
+
+    if (!withinRange(stressForm.interestRateShockPercent, -100, 100)) {
+      errors.interestRateShockPercent = 'Entre -100 % et 100 %.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setStressErrors(errors);
+      notify('Corrige les paramètres du stress test.', 'error');
+      return false;
+    }
+
+    setStressErrors({});
+    return true;
   };
 
   const handleCreateScenario = () => {
-    createScenario.mutate(scenarioForm);
+    if (!validateScenarioForm()) {
+      return;
+    }
+
+    createScenario.mutate(scenarioForm, {
+      onSuccess: () => {
+        notify('Scénario enregistré.', 'success');
+      },
+      onError: (error: unknown) => {
+        notify(getApiErrorMessage(error, 'Impossible de créer le scénario.'), 'error');
+      }
+    });
   };
 
   const handleDeleteScenario = (scenarioId?: number) => {
     if (!scenarioId) {
       return;
     }
-    deleteScenario.mutate(scenarioId);
+    deleteScenario.mutate(scenarioId, {
+      onSuccess: () => {
+        notify('Scénario supprimé.', 'success');
+      },
+      onError: (error: unknown) => {
+        notify(getApiErrorMessage(error, 'Suppression impossible pour le moment.'), 'error');
+      }
+    });
   };
 
   const handleRunStressTest = () => {
     setStressResult(null);
+    if (!validateStressForm()) {
+      return;
+    }
     runStressTest.mutate(stressForm, {
       onSuccess: (result) => {
         setStressResult(result);
+        notify('Stress test complété.', 'success');
+      },
+      onError: (error: unknown) => {
+        notify(getApiErrorMessage(error, 'Stress test impossible pour le moment.'), 'error');
       }
     });
   };
@@ -397,6 +524,8 @@ function FamilyWealthScreen() {
                   value={scenarioForm.label}
                   onChange={handleScenarioInputChange('label')}
                   fullWidth
+                  error={Boolean(scenarioErrors.label)}
+                  helperText={scenarioErrors.label}
                 />
               </Grid>
               <Grid item xs={6} md={3}>
@@ -420,6 +549,8 @@ function FamilyWealthScreen() {
                   onChange={handleScenarioInputChange('horizonYears')}
                   inputProps={{ min: 1, max: 50 }}
                   fullWidth
+                  error={Boolean(scenarioErrors.horizonYears)}
+                  helperText={scenarioErrors.horizonYears}
                 />
               </Grid>
               <Grid item xs={6} md={3}>
@@ -430,6 +561,8 @@ function FamilyWealthScreen() {
                   onChange={handleScenarioInputChange('growthRatePercent')}
                   inputProps={{ step: 0.5, min: -100, max: 100 }}
                   fullWidth
+                  error={Boolean(scenarioErrors.growthRatePercent)}
+                  helperText={scenarioErrors.growthRatePercent}
                 />
               </Grid>
               <Grid item xs={6} md={3}>
@@ -440,6 +573,8 @@ function FamilyWealthScreen() {
                   onChange={handleScenarioInputChange('drawdownPercent')}
                   inputProps={{ step: 1, min: 0, max: 100 }}
                   fullWidth
+                  error={Boolean(scenarioErrors.drawdownPercent)}
+                  helperText={scenarioErrors.drawdownPercent}
                 />
               </Grid>
               <Grid item xs={6} md={3}>
@@ -448,8 +583,10 @@ function FamilyWealthScreen() {
                   type="number"
                   value={scenarioForm.annualContribution}
                   onChange={handleScenarioInputChange('annualContribution')}
-                  inputProps={{ step: 1000 }}
+                  inputProps={{ step: 1000, min: -1_000_000, max: 1_000_000 }}
                   fullWidth
+                  error={Boolean(scenarioErrors.annualContribution)}
+                  helperText={scenarioErrors.annualContribution}
                 />
               </Grid>
               <Grid item xs={6} md={3}>
@@ -458,8 +595,10 @@ function FamilyWealthScreen() {
                   type="number"
                   value={scenarioForm.annualWithdrawal}
                   onChange={handleScenarioInputChange('annualWithdrawal')}
-                  inputProps={{ step: 1000 }}
+                  inputProps={{ step: 1000, min: -1_000_000, max: 1_000_000 }}
                   fullWidth
+                  error={Boolean(scenarioErrors.annualWithdrawal)}
+                  helperText={scenarioErrors.annualWithdrawal}
                 />
               </Grid>
               <Grid item xs={12} md={3}>
@@ -473,7 +612,7 @@ function FamilyWealthScreen() {
               <Button
                 variant="contained"
                 onClick={handleCreateScenario}
-                disabled={createScenario.isPending}
+                disabled={createScenario.isPending || !scenarioForm.label.trim()}
               >
                 Lancer le scénario
               </Button>
@@ -537,6 +676,8 @@ function FamilyWealthScreen() {
                   onChange={handleStressInputChange('propertyValueShockPercent')}
                   inputProps={{ step: 1, min: -100, max: 100 }}
                   fullWidth
+                  error={Boolean(stressErrors.propertyValueShockPercent)}
+                  helperText={stressErrors.propertyValueShockPercent}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -547,6 +688,8 @@ function FamilyWealthScreen() {
                   onChange={handleStressInputChange('marketShockPercent')}
                   inputProps={{ step: 1, min: -100, max: 100 }}
                   fullWidth
+                  error={Boolean(stressErrors.marketShockPercent)}
+                  helperText={stressErrors.marketShockPercent}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
@@ -557,6 +700,8 @@ function FamilyWealthScreen() {
                   onChange={handleStressInputChange('interestRateShockPercent')}
                   inputProps={{ step: 0.5, min: -100, max: 100 }}
                   fullWidth
+                  error={Boolean(stressErrors.interestRateShockPercent)}
+                  helperText={stressErrors.interestRateShockPercent}
                 />
               </Grid>
             </Grid>

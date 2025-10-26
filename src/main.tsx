@@ -3,8 +3,10 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { CssBaseline, ThemeProvider, createTheme } from '@mui/material';
 
+
 import App from './App';
 import { QueryClientProvider } from './providers/QueryProvider';
+import { NotificationProvider } from './components/NotificationProvider';
 
 const rootElement = document.getElementById('root');
 const theme = createTheme({
@@ -31,9 +33,11 @@ if (rootElement) {
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <QueryClientProvider>
-          <BrowserRouter future={routerFutureConfig}>
-            <App />
-          </BrowserRouter>
+          <NotificationProvider>
+            <BrowserRouter future={routerFutureConfig}>
+              <App />
+            </BrowserRouter>
+          </NotificationProvider>
         </QueryClientProvider>
       </ThemeProvider>
     </React.StrictMode>

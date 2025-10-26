@@ -1,4 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { useNotification } from '../components/NotificationProvider';
 import {
   Alert,
   Box,
@@ -47,6 +48,21 @@ interface PersonalIncomeFormState {
   amount: number;
 }
 
+type PersonalIncomeFieldError = Partial<Record<keyof PersonalIncomeFormState, string>>;
+
+const parseLocaleNumber = (raw: string): number => {
+  const normalized = raw
+    .replace(/\s+/g, '')
+    .replace(/\$/g, '')
+    .replace(/,/g, '.')
+    .replace(/[^0-9.+-]/g, '');
+  if (!normalized) {
+    return Number.NaN;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+};
+
 const categoryLabels: Record<PersonalIncomeCategory, string> = {
   EMPLOYMENT: 'Salaire (T4)',
   PENSION: 'Pension privée (T4A)',
@@ -78,6 +94,7 @@ function createInitialForm(shareholderId: number | null, taxYear: number): Perso
 }
 
 function PersonalIncomeScreen() {
+  const { notify } = useNotification();
   const currentYear = useMemo(() => new Date().getFullYear(), []);
   const [selectedShareholderId, setSelectedShareholderId] = useState<number | null>(null);
   const [selectedTaxYear, setSelectedTaxYear] = useState<number>(currentYear);
@@ -85,6 +102,7 @@ function PersonalIncomeScreen() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingIncomeId, setEditingIncomeId] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<PersonalIncomeFieldError>({});
   const [deductions, setDeductions] = useState<number>(0);
   const [otherCredits, setOtherCredits] = useState<number>(0);
   const [province, setProvince] = useState<'QC' | 'OTHER'>('QC');
@@ -134,6 +152,7 @@ function PersonalIncomeScreen() {
 
   const handleOpenForm = () => {
     setFormError(null);
+    setFieldErrors({});
     setEditingIncomeId(null);
     setForm(createInitialForm(selectedShareholderId, selectedTaxYear));
     setFormOpen(true);
@@ -141,6 +160,7 @@ function PersonalIncomeScreen() {
 
   const handleEditIncome = (income: PersonalIncomeDto) => {
     setFormError(null);
+    setFieldErrors({});
     setEditingIncomeId(income.id);
     setForm({
       shareholderId: income.shareholderId,
@@ -159,34 +179,43 @@ function PersonalIncomeScreen() {
     setForm(createInitialForm(selectedShareholderId, selectedTaxYear));
     setEditingIncomeId(null);
     setFormError(null);
+    setFieldErrors({});
   };
 
   const buildPayload = (): PersonalIncomePayload | null => {
+    const errors: PersonalIncomeFieldError = {};
+
     if (!form.shareholderId) {
-      setFormError('Choisis un actionnaire.');
-      return null;
+      errors.shareholderId = 'Choisis un actionnaire.';
     }
 
-    if (!form.label.trim()) {
-      setFormError('Ajoute un libellé.');
-      return null;
+    const trimmedLabel = form.label.trim();
+    if (!trimmedLabel) {
+      errors.label = 'Ajoute un libellé.';
     }
 
     if (!Number.isFinite(form.amount) || form.amount <= 0) {
-      setFormError('Indique un montant supérieur à 0.');
-      return null;
+      errors.amount = 'Indique un montant supérieur à 0.';
     }
 
     if (!Number.isInteger(form.taxYear) || form.taxYear < 2000) {
-      setFormError('Choisis une année fiscale valide.');
+      errors.taxYear = 'Choisis une année fiscale valide.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      setFormError('Corrige les champs en surbrillance.');
       return null;
     }
 
+    setFieldErrors({});
+    setFormError(null);
+
     return {
-      shareholderId: form.shareholderId,
+      shareholderId: form.shareholderId as number,
       taxYear: form.taxYear,
       category: form.category,
-      label: form.label.trim(),
+      label: trimmedLabel,
       source: form.source.trim() ? form.source.trim() : null,
       slipType: form.slipType.trim() ? form.slipType.trim() : null,
       amount: Number(form.amount)
@@ -199,11 +228,15 @@ function PersonalIncomeScreen() {
       return;
     }
 
-    const onError = () => setFormError("Enregistrement impossible pour le moment.");
+    const onError = () => {
+      setFormError("Enregistrement impossible pour le moment.");
+      notify("Erreur lors de l'enregistrement du revenu.", 'error');
+    };
 
     if (editingIncomeId) {
       updateIncome.mutate(payload, {
         onSuccess: () => {
+          notify('Revenu modifié avec succès.', 'success');
           handleCloseForm();
         },
         onError
@@ -213,6 +246,7 @@ function PersonalIncomeScreen() {
 
     createIncome.mutate(payload, {
       onSuccess: () => {
+        notify('Revenu ajouté avec succès.', 'success');
         handleCloseForm();
       },
       onError
@@ -224,8 +258,10 @@ function PersonalIncomeScreen() {
     if (!confirmed) {
       return;
     }
-
-    deleteIncome.mutate(income.id);
+    deleteIncome.mutate(income.id, {
+      onSuccess: () => notify('Revenu supprimé.', 'success'),
+      onError: () => notify('Erreur lors de la suppression.', 'error')
+    });
   };
 
   const isSaving = createIncome.isPending || updateIncome.isPending;
@@ -283,10 +319,20 @@ function PersonalIncomeScreen() {
               if (Number.isFinite(value)) {
                 setSelectedShareholderId(value);
                 setForm((prev) => ({ ...prev, shareholderId: value }));
+                setFieldErrors((prev) => {
+                  if (!prev.shareholderId) {
+                    return prev;
+                  }
+                  const next = { ...prev };
+                  delete next.shareholderId;
+                  return next;
+                });
               }
             }}
             sx={{ minWidth: 220 }}
             disabled={isLoadingShareholders || !shareholders || shareholders.length === 0}
+            error={Boolean(fieldErrors.shareholderId)}
+            helperText={fieldErrors.shareholderId}
           >
             {shareholders?.map((shareholder) => (
               <MenuItem key={shareholder.id} value={shareholder.id}>
@@ -582,6 +628,8 @@ function PersonalIncomeScreen() {
                 setForm((prev) => ({ ...prev, category: event.target.value as PersonalIncomeCategory }))
               }
               required
+              error={Boolean(fieldErrors.category)}
+              helperText={fieldErrors.category}
             >
               {categoryOptions.map((option) => (
                 <MenuItem key={option.value} value={option.value}>
@@ -592,10 +640,21 @@ function PersonalIncomeScreen() {
             <TextField
               label="Libellé"
               value={form.label}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                setForm((prev) => ({ ...prev, label: event.target.value }))
-              }
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const { value } = event.target;
+                setForm((prev) => ({ ...prev, label: value }));
+                setFieldErrors((prev) => {
+                  if (!prev.label) {
+                    return prev;
+                  }
+                  const next = { ...prev };
+                  delete next.label;
+                  return next;
+                });
+              }}
               required
+              error={Boolean(fieldErrors.label)}
+              helperText={fieldErrors.label}
             />
             <TextField
               label="Source (employeur, institution)"
@@ -616,10 +675,21 @@ function PersonalIncomeScreen() {
               type="number"
               value={form.amount}
               inputProps={{ min: 0, step: 0.01 }}
-              onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                setForm((prev) => ({ ...prev, amount: Number(event.target.value) }))
-              }
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const parsed = parseLocaleNumber(event.target.value);
+                setForm((prev) => ({ ...prev, amount: Number.isNaN(parsed) ? prev.amount : parsed }));
+                setFieldErrors((prev) => {
+                  if (!prev.amount) {
+                    return prev;
+                  }
+                  const next = { ...prev };
+                  delete next.amount;
+                  return next;
+                });
+              }}
               required
+              error={Boolean(fieldErrors.amount)}
+              helperText={fieldErrors.amount}
             />
             <TextField
               label="Année fiscale"
@@ -632,8 +702,18 @@ function PersonalIncomeScreen() {
                   ...prev,
                   taxYear: Number.isFinite(value) ? Math.trunc(value) : prev.taxYear
                 }));
+                setFieldErrors((prev) => {
+                  if (!prev.taxYear) {
+                    return prev;
+                  }
+                  const next = { ...prev };
+                  delete next.taxYear;
+                  return next;
+                });
               }}
               required
+              error={Boolean(fieldErrors.taxYear)}
+              helperText={fieldErrors.taxYear}
             />
           </Stack>
         </DialogContent>

@@ -5,10 +5,12 @@ import { Box, Button, Paper, TextField, Typography, Alert, Stack } from '@mui/ma
 
 import { apiClient } from '../api/client';
 import { useAuthStore, type AuthState } from '../store/authStore';
+import { useNotification } from '../components/NotificationProvider';
 
 function LoginScreen() {
   const navigate = useNavigate();
   const setToken = useAuthStore((state: AuthState) => state.setToken);
+  const { notify } = useNotification();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,37 +42,39 @@ function LoginScreen() {
         if (password !== confirmPassword) {
           setError('Les mots de passe ne correspondent pas.');
           setLoading(false);
+          notify('Les mots de passe ne correspondent pas.', 'error');
           return;
         }
 
         const { data } = await apiClient.post<{ token: string }>('/auth/register', { email, password });
         setToken(data.token);
+        notify('Compte créé avec succès.', 'success');
         navigate('/dashboard');
       } else {
         const { data } = await apiClient.post<{ token: string }>('/auth/login', { email, password });
         setToken(data.token);
+        notify('Connexion réussie.', 'success');
         navigate('/dashboard');
       }
     } catch (error) {
       console.error('Login failed', error);
+      let resolvedMessage: string;
       if (axios.isAxiosError(error)) {
         const serverMessage = (error.response?.data as { error?: string } | undefined)?.error;
         if (serverMessage) {
-          setError(serverMessage);
+          resolvedMessage = serverMessage;
         } else {
-          setError(
-            isRegister
-              ? 'Impossible de créer le compte pour le moment. Réessaie dans quelques instants.'
-              : "Échec de l'authentification. Vérifie tes identifiants."
-          );
+          resolvedMessage = isRegister
+            ? 'Impossible de créer le compte pour le moment. Réessaie dans quelques instants.'
+            : "Échec de l'authentification. Vérifie tes identifiants.";
         }
       } else {
-        setError(
-          isRegister
-            ? 'Impossible de créer le compte pour le moment. Réessaie dans quelques instants.'
-            : "Échec de l'authentification. Vérifie tes identifiants."
-        );
+        resolvedMessage = isRegister
+          ? 'Impossible de créer le compte pour le moment. Réessaie dans quelques instants.'
+          : "Échec de l'authentification. Vérifie tes identifiants.";
       }
+      setError(resolvedMessage);
+      notify(resolvedMessage, 'error');
     } finally {
       setLoading(false);
     }
