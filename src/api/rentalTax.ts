@@ -7,6 +7,9 @@ export type RentalTaxFormType = 'T776' | 'TP128';
 export interface RentalTaxExpenseLine {
   key: string;
   label: string;
+  lineNumber?: string | null;
+  hint?: string | null;
+  description?: string | null;
   amount: number;
   category?: string | null;
 }
@@ -15,6 +18,39 @@ export interface RentalTaxIncomeLine {
   key: string;
   label: string;
   amount: number;
+}
+
+export type RentalTaxMetadataFieldType = 'text' | 'number' | 'percentage' | 'date' | 'textarea';
+
+export interface RentalTaxMetadataField {
+  key: string;
+  label: string;
+  value: string | number | null;
+  type?: RentalTaxMetadataFieldType;
+  hint?: string | null;
+  lineNumber?: string | null;
+}
+
+export interface RentalTaxIncomeLabels {
+  grossRents: string;
+  otherIncome: string;
+  totalIncome: string;
+  grossRentsLine?: string | null;
+  otherIncomeLine?: string | null;
+  totalIncomeLine?: string | null;
+}
+
+export interface RentalTaxCcaLine {
+  key: string;
+  classNumber: string;
+  description?: string | null;
+  ccaRate?: number | null;
+  openingBalance?: number | null;
+  additions?: number | null;
+  dispositions?: number | null;
+  baseForCca?: number | null;
+  ccaAmount?: number | null;
+  closingBalance?: number | null;
 }
 
 export interface RentalTaxComputedData {
@@ -27,15 +63,19 @@ export interface RentalTaxComputedData {
   mortgageInterest: number;
   capitalCostAllowance: number;
   incomeDetails: RentalTaxIncomeLine[];
+  ccaDetails: RentalTaxCcaLine[];
 }
 
 export interface RentalTaxFormPayload {
+  metadata?: RentalTaxMetadataField[];
   income: {
     grossRents: number;
     otherIncome: number;
     totalIncome: number;
   };
+  incomeLabels?: RentalTaxIncomeLabels;
   expenses: RentalTaxExpenseLine[];
+  cca?: RentalTaxCcaLine[];
   totals: {
     totalExpenses: number;
     netIncome: number;
