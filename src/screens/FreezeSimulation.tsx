@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useState } from 'react';
 import {
   Alert,
   Box,
@@ -28,18 +28,16 @@ import DeleteIcon from '@mui/icons-material/Delete';
 
 import {
   useFreezeAssets,
-  useFreezeShareholders,
   useFreezeScenarios,
   useCreateFreezeScenario,
   useDeleteFreezeScenario,
   useRunFreezeSimulation,
-  type FreezeScenarioDto,
   type FreezeScenarioPayload,
   type FreezeSimulationInputs,
   type FreezeSimulationResult
 } from '../api/freeze';
 
-interface ScenarioFormState extends FreezeScenarioPayload {}
+type ScenarioFormState = FreezeScenarioPayload;
 
 interface SimulationFormState {
   scenarioId: number | null;
@@ -78,7 +76,6 @@ function createInitialSimulationForm(): SimulationFormState {
 
 export default function FreezeSimulationScreen() {
   const assetsQuery = useFreezeAssets();
-  const shareholdersQuery = useFreezeShareholders();
   const scenariosQuery = useFreezeScenarios();
 
   const createScenario = useCreateFreezeScenario();
@@ -92,14 +89,6 @@ export default function FreezeSimulationScreen() {
   const [simulationForm, setSimulationForm] = useState<SimulationFormState>(createInitialSimulationForm());
   const [simulationResult, setSimulationResult] = useState<FreezeSimulationResult | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
-
-  const assetsById = useMemo(() => {
-    const map = new Map<number, { label: string; fairMarketValue: number }>();
-    assetsQuery.data?.forEach((asset) => {
-      map.set(asset.id, { label: asset.label, fairMarketValue: asset.fairMarketValue });
-    });
-    return map;
-  }, [assetsQuery.data]);
 
   const handleOpenScenarioDialog = () => {
     setScenarioForm(createInitialScenarioForm());
