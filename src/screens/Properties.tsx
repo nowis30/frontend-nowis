@@ -366,7 +366,7 @@ function PropertiesScreen() {
     setMobileQrOpen(true);
     setMobileQrLoading(true);
     setMobileQrError(null);
-  setMobileQrDataUrl(null);
+    setMobileQrDataUrl(null);
     try {
       const dataUrl = await toQrDataURL(targetUrl, { margin: 1, width: 320 });
       setMobileQrDataUrl(dataUrl);
@@ -1453,19 +1453,9 @@ function PropertiesScreen() {
           <Table size="small">
             <TableHead>
               <TableRow>
-                <TableCell>Nom</TableCell>
-                <TableCell>Adresse</TableCell>
-                <TableCell align="right">Unités</TableCell>
-                <TableCell align="right">Loyer potentiel</TableCell>
-                <TableCell align="right">Valeur actuelle</TableCell>
-                <TableCell align="right">Dette en cours</TableCell>
-                <TableCell align="right">Ratio LTV</TableCell>
-                <TableCell align="right">Service de la dette</TableCell>
-                <TableCell align="right">Capital remboursé</TableCell>
-                <TableCell align="right">Intérêts</TableCell>
-                <TableCell align="right">Cashflow net</TableCell>
-                <TableCell align="right">Équité</TableCell>
-                <TableCell align="right">CCA</TableCell>
+                <TableCell>Immeuble</TableCell>
+                <TableCell align="right">Valeur &amp; dette</TableCell>
+                <TableCell align="right">Performance</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -1475,127 +1465,145 @@ function PropertiesScreen() {
 
                 return (
                   <TableRow key={property.id} hover>
-                    <TableCell>{property.name}</TableCell>
-                    <TableCell>{property.address ?? '—'}</TableCell>
-                    <TableCell align="right">
-                      {metrics ? metrics.unitsCount : '—'}
+                    <TableCell>
+                      <Stack spacing={0.5}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                          {property.name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {property.address ?? '—'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {metrics ? `${metrics.unitsCount} unités` : 'Unités : —'}
+                        </Typography>
+                      </Stack>
                     </TableCell>
                     <TableCell align="right">
-                      {formatCurrency(metrics?.rentPotentialMonthly)}
+                      <Stack spacing={0.5} alignItems="flex-end">
+                        <Typography variant="body2">
+                          Valeur : {formatCurrency(property.currentValue)}
+                        </Typography>
+                        <Typography variant="body2">
+                          Dette : {formatCurrency(metrics?.outstandingDebt)}
+                        </Typography>
+                        <Typography variant="body2">
+                          LTV : {formatPercent(metrics?.loanToValue)}
+                        </Typography>
+                      </Stack>
                     </TableCell>
-                    <TableCell align="right">{formatCurrency(property.currentValue)}</TableCell>
-                    <TableCell align="right">{formatCurrency(metrics?.outstandingDebt)}</TableCell>
-                    <TableCell align="right">{formatPercent(metrics?.loanToValue)}</TableCell>
-                    <TableCell align="right">{formatCurrency(metrics?.debtService)}</TableCell>
-                    <TableCell align="right">{formatCurrency(metrics?.principalPortion)}</TableCell>
-                    <TableCell align="right">{formatCurrency(metrics?.interestPortion)}</TableCell>
-                    <TableCell align="right">{formatCurrency(metrics?.netCashflow)}</TableCell>
-                    <TableCell align="right">{formatCurrency(metrics?.equity)}</TableCell>
-                    <TableCell align="right">{formatCurrency(metrics?.cca)}</TableCell>
                     <TableCell align="right">
-                      <IconButton
-                        edge="end"
-                        aria-label="modifier"
-                        onClick={() => {
-                          setMutationError(null);
-                          setEditingPropertyId(property.id);
-                          const acquisitionDateValue = property.acquisitionDate as unknown;
-                          const normalizedAcquisitionDate =
-                            typeof acquisitionDateValue === 'string'
-                              ? acquisitionDateValue.slice(0, 10)
-                              : acquisitionDateValue instanceof Date
-                              ? acquisitionDateValue.toISOString().slice(0, 10)
-                              : undefined;
-                          setForm({
-                            name: property.name,
-                            address: property.address ?? undefined,
-                            acquisitionDate: normalizedAcquisitionDate,
-                            purchasePrice: toNumberOrUndefined(property.purchasePrice),
-                            currentValue: toNumberOrUndefined(property.currentValue),
-                            notes: property.notes ?? undefined
-                          });
-                          setOpen(true);
-                        }}
-                        sx={{ mr: 0.5 }}
-                      >
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        aria-label="unités"
-                        onClick={() => handleOpenUnitDialog(property)}
-                        sx={{ mr: 0.5 }}
-                      >
-                        <ApartmentIcon />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        aria-label="hypothèques"
-                        onClick={() => handleOpenMortgageDialog(property)}
-                        sx={{ mr: 0.5 }}
-                      >
-                        <AccountBalanceIcon />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        aria-label="supprimer"
-                        onClick={() => deleteMutation.mutate(property.id)}
-                        sx={{ mr: 0.5 }}
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        aria-label="Paramètres CCA"
-                        onClick={() => {
-                          setSelectedPropertyId(property.id);
-                          setCcaOpen(true);
-                          setCcaError(null);
-                        }}
-                      >
-                        <SettingsIcon />
-                      </IconButton>
+                      <Stack spacing={0.5} alignItems="flex-end">
+                        <Typography variant="body2">
+                          Loyer potentiel : {formatCurrency(metrics?.rentPotentialMonthly)}
+                        </Typography>
+                        <Typography variant="body2">
+                          Service dette : {formatCurrency(metrics?.debtService)}
+                        </Typography>
+                        <Typography variant="body2">
+                          Cashflow net : {formatCurrency(metrics?.netCashflow)}
+                        </Typography>
+                        <Typography variant="body2">
+                          CCA : {formatCurrency(metrics?.cca)}
+                        </Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Stack direction="row" spacing={0.5} justifyContent="flex-end" flexWrap="wrap">
+                        <IconButton
+                          edge="end"
+                          aria-label="modifier"
+                          onClick={() => {
+                            setMutationError(null);
+                            setEditingPropertyId(property.id);
+                            const acquisitionDateValue = property.acquisitionDate as unknown;
+                            const normalizedAcquisitionDate =
+                              typeof acquisitionDateValue === 'string'
+                                ? acquisitionDateValue.slice(0, 10)
+                                : acquisitionDateValue instanceof Date
+                                ? acquisitionDateValue.toISOString().slice(0, 10)
+                                : undefined;
+                            setForm({
+                              name: property.name,
+                              address: property.address ?? undefined,
+                              acquisitionDate: normalizedAcquisitionDate,
+                              purchasePrice: toNumberOrUndefined(property.purchasePrice),
+                              currentValue: toNumberOrUndefined(property.currentValue),
+                              notes: property.notes ?? undefined
+                            });
+                            setOpen(true);
+                          }}
+                        >
+                          <EditIcon />
+                        </IconButton>
+                        <IconButton edge="end" aria-label="unités" onClick={() => handleOpenUnitDialog(property)}>
+                          <ApartmentIcon />
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          aria-label="hypothèques"
+                          onClick={() => handleOpenMortgageDialog(property)}
+                        >
+                          <AccountBalanceIcon />
+                        </IconButton>
+                        <IconButton edge="end" aria-label="supprimer" onClick={() => deleteMutation.mutate(property.id)}>
+                          <DeleteIcon />
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          aria-label="Paramètres CCA"
+                          onClick={() => {
+                            setSelectedPropertyId(property.id);
+                            setCcaOpen(true);
+                            setCcaError(null);
+                          }}
+                        >
+                          <SettingsIcon />
+                        </IconButton>
+                      </Stack>
                     </TableCell>
                   </TableRow>
                 );
               })}
               {totals && (
                 <TableRow sx={{ backgroundColor: 'rgba(25, 118, 210, 0.08)' }}>
-                  <TableCell component="th" scope="row" colSpan={2} sx={{ fontWeight: 600 }}>
-                    Total portefeuille
+                  <TableCell sx={{ fontWeight: 600 }}>
+                    <Stack spacing={0.5}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        Total portefeuille
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {totals.unitsCount} unités
+                      </Typography>
+                    </Stack>
                   </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {totals.unitsCount}
+                  <TableCell align="right">
+                    <Stack spacing={0.5} alignItems="flex-end">
+                      <Typography variant="body2">
+                        Valeur : {formatCurrency(totalCurrentValue)}
+                      </Typography>
+                      <Typography variant="body2">
+                        Dette : {formatCurrency(totals.outstandingDebt)}
+                      </Typography>
+                      <Typography variant="body2">
+                        LTV : {formatPercent(totals.loanToValue)}
+                      </Typography>
+                    </Stack>
                   </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.rentPotentialMonthly)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totalCurrentValue)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.outstandingDebt)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatPercent(totals.loanToValue)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.debtService)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.principalPortion)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.interestPortion)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.netCashflow)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.equity)}
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>
-                    {formatCurrency(totals.cca)}
+                  <TableCell align="right">
+                    <Stack spacing={0.5} alignItems="flex-end">
+                      <Typography variant="body2">
+                        Loyer potentiel : {formatCurrency(totals.rentPotentialMonthly)}
+                      </Typography>
+                      <Typography variant="body2">
+                        Service dette : {formatCurrency(totals.debtService)}
+                      </Typography>
+                      <Typography variant="body2">
+                        Cashflow net : {formatCurrency(totals.netCashflow)}
+                      </Typography>
+                      <Typography variant="body2">
+                        CCA : {formatCurrency(totals.cca)}
+                      </Typography>
+                    </Stack>
                   </TableCell>
                   <TableCell align="right" sx={{ fontWeight: 600 }}>
                     —

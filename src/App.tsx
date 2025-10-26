@@ -11,10 +11,13 @@ import RevenuesScreen from './screens/Revenues';
 import CompaniesScreen from './screens/Companies';
 import TeamScreen from './screens/Team';
 import ReportsScreen from './screens/Reports';
+import LeveragedBuybackScreen from './screens/LeveragedBuyback';
 import AdvisorsScreen from './screens/Advisors';
 import AdvisorPortalPage from './screens/AdvisorPortal';
 import SpecialistSession from './screens/SpecialistSession';
 import MobileUploadScreen from './screens/MobileUpload';
+import RentalTaxScreen from './screens/RentalTax';
+import ValuationScreen from './screens/Valuation';
 
 function App() {
   return (
@@ -35,7 +38,10 @@ function App() {
         <Route path="/companies" element={<CompaniesScreen />} />
         <Route path="/team" element={<TeamScreen />} />
         <Route path="/reports" element={<ReportsScreen />} />
+        <Route path="/valuation" element={<ValuationScreen />} />
+        <Route path="/leveraged-buyback" element={<LeveragedBuybackScreen />} />
         <Route path="/advisors" element={<AdvisorsScreen />} />
+        <Route path="/rental-tax" element={<RentalTaxScreen />} />
         <Route path="/session" element={<SpecialistSession />} />
         <Route path="/invoices" element={<InvoicesScreen />} />
         <Route path="/revenues" element={<RevenuesScreen />} />
