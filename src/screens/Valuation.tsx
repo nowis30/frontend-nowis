@@ -149,6 +149,13 @@ interface ValuationStressForm {
   interestRateShockPercent: number;
   debtShockPercent: number;
 }
+type FamilyWealthSeriesPoint = {
+  label: string;
+  netWorth: number;
+  assets: number;
+  liabilities: number;
+};
+type SeriesKey = keyof Omit<FamilyWealthSeriesPoint, 'label'>;
 
 interface ValuationStressSummary {
   baseNetWorth: number;
@@ -234,11 +241,13 @@ export default function ValuationScreen() {
 
   const showFamilyWealthPanel = filter === 'all';
   const storedPreferences = useMemo(() => readStoredPreferences(), []);
-  const [seriesVisibility, setSeriesVisibility] = useState(storedPreferences?.seriesVisibility ?? {
-    netWorth: true,
-    assets: true,
-    liabilities: true
-  });
+  const [seriesVisibility, setSeriesVisibility] = useState<Record<SeriesKey, boolean>>(
+    storedPreferences?.seriesVisibility ?? {
+      netWorth: true,
+      assets: true,
+      liabilities: true
+    }
+  );
   const [useLogScale, setUseLogScale] = useState(storedPreferences?.useLogScale ?? false);
   const [stressForm, setStressForm] = useState<ValuationStressForm>({
     propertyValueShockPercent: -8,
@@ -461,7 +470,7 @@ export default function ValuationScreen() {
     };
   }, [familyWealthHistoryQuery.data]);
 
-  const familyWealthSeries = useMemo(() => {
+  const familyWealthSeries = useMemo<FamilyWealthSeriesPoint[]>(() => {
     const timeline = familyWealthHistoryQuery.data ?? [];
     return timeline.map((point) => ({
       label: new Date(point.snapshotDate).toLocaleDateString('fr-CA'),
@@ -587,9 +596,9 @@ export default function ValuationScreen() {
         : null)
     : null;
 
-  const activeSeriesKeys = useMemo(
+  const activeSeriesKeys = useMemo<SeriesKey[]>(
     () =>
-      (Object.entries(seriesVisibility) as Array<[keyof typeof seriesVisibility, boolean]>)
+      (Object.entries(seriesVisibility) as Array<[SeriesKey, boolean]>)
         .filter(([, visible]) => visible)
         .map(([key]) => key),
     [seriesVisibility]
@@ -600,7 +609,7 @@ export default function ValuationScreen() {
       return false;
     }
     return familyWealthSeries.every((point) =>
-      activeSeriesKeys.every((key) => (point as Record<string, number>)[key] > 0)
+      activeSeriesKeys.every((key) => point[key] > 0)
     );
   }, [activeSeriesKeys, familyWealthSeries]);
 
@@ -610,7 +619,7 @@ export default function ValuationScreen() {
     }
   }, [canUseLogScale, useLogScale]);
 
-  const handleSeriesToggle = (key: keyof typeof seriesVisibility) => (event: ChangeEvent<HTMLInputElement>) => {
+  const handleSeriesToggle = (key: SeriesKey) => (event: ChangeEvent<HTMLInputElement>) => {
     const checked = event.target.checked;
     if (!checked && activeSeriesKeys.length <= 1) {
       return;
