@@ -16,9 +16,12 @@ import {
   TableRow,
   TextField,
   Typography,
-  Alert
+  Alert,
+  IconButton
 } from '@mui/material';
 import dayjs from 'dayjs';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 import { apiClient } from '../api/client';
 import { usePropertyOptions, type PropertyOption } from '../api/properties';
@@ -49,21 +52,27 @@ function useInvoiceData() {
   });
 }
 
+const initialFormState = (): InvoicePayload => ({
+  propertyId: 0,
+  invoiceDate: dayjs().format('YYYY-MM-DD'),
+  supplier: '',
+  amount: 0,
+  category: '',
+  gst: null,
+  qst: null,
+  description: ''
+});
+
 function InvoicesScreen() {
   const queryClient = useQueryClient();
   const { data: invoices, isLoading } = useInvoiceData();
   const { data: properties } = usePropertyOptions();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<InvoicePayload>({
-    propertyId: 0,
-    invoiceDate: dayjs().format('YYYY-MM-DD'),
-    supplier: '',
-    amount: 0,
-    category: '',
-    gst: null,
-    qst: null
-  });
+  const [form, setForm] = useState<InvoicePayload>(initialFormState());
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [tableError, setTableError] = useState<string | null>(null);
+  const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
+  const [deletingInvoiceId, setDeletingInvoiceId] = useState<number | null>(null);
 
   const formatter = useMemo(
     () =>
@@ -81,15 +90,9 @@ function InvoicesScreen() {
       queryClient.invalidateQueries({ queryKey: ['summary'] });
       setOpen(false);
       setMutationError(null);
-      setForm({
-        propertyId: 0,
-        invoiceDate: dayjs().format('YYYY-MM-DD'),
-        supplier: '',
-        amount: 0,
-        category: '',
-        gst: null,
-        qst: null
-      });
+      setTableError(null);
+      setEditingInvoiceId(null);
+      setForm(initialFormState());
     },
     onError: (error: unknown) => {
       const message =
@@ -100,26 +103,144 @@ function InvoicesScreen() {
     }
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: InvoicePayload }) =>
+      apiClient.put(`/invoices/${id}`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['summary'] });
+      setOpen(false);
+      setMutationError(null);
+      setTableError(null);
+      setEditingInvoiceId(null);
+      setForm(initialFormState());
+    },
+    onError: (error: unknown) => {
+      const message =
+        error && typeof error === 'object' && 'response' in error && error.response
+          ? (error as { response?: { data?: { error?: string } } }).response?.data?.error
+          : null;
+      setMutationError(message ?? "Impossible de mettre à jour la facture.");
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiClient.delete(`/invoices/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['summary'] });
+      setTableError(null);
+    },
+    onError: (error: unknown) => {
+      const message =
+        error && typeof error === 'object' && 'response' in error && error.response
+          ? (error as { response?: { data?: { error?: string } } }).response?.data?.error
+          : null;
+      setTableError(message ?? 'Impossible de supprimer la facture pour le moment.');
+    },
+    onSettled: () => {
+      setDeletingInvoiceId(null);
+    }
+  });
+
   const totalTtc = useMemo(() => {
     const gst = form.gst ?? 0;
     const qst = form.qst ?? 0;
     return form.amount + gst + qst;
   }, [form.amount, form.gst, form.qst]);
 
+  const handleOpenCreate = () => {
+    setForm(initialFormState());
+    setEditingInvoiceId(null);
+    setMutationError(null);
+    setOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setOpen(false);
+    setMutationError(null);
+    setEditingInvoiceId(null);
+    setForm(initialFormState());
+  };
+
+  const handleEditInvoice = (invoice: InvoiceDto) => {
+    setTableError(null);
+    setMutationError(null);
+    setEditingInvoiceId(invoice.id);
+    setForm({
+      propertyId: invoice.propertyId,
+      invoiceDate: dayjs(invoice.invoiceDate).format('YYYY-MM-DD'),
+      supplier: invoice.supplier,
+      amount: invoice.amount,
+      category: invoice.category,
+      gst: invoice.gst ?? null,
+      qst: invoice.qst ?? null,
+      description: invoice.description ?? ''
+    });
+    setOpen(true);
+  };
+
+  const handleDeleteInvoice = (invoice: InvoiceDto) => {
+    setTableError(null);
+    const confirmed = window.confirm('Supprimer cette facture définitivement ?');
+    if (!confirmed) {
+      return;
+    }
+    setDeletingInvoiceId(invoice.id);
+    deleteMutation.mutate(invoice.id);
+  };
+
+  const handleSubmit = () => {
+    if (!form.propertyId) {
+      setMutationError('Sélectionnez un immeuble.');
+      return;
+    }
+
+    if (!form.supplier.trim()) {
+      setMutationError('Le fournisseur est requis.');
+      return;
+    }
+
+    if (!form.category.trim()) {
+      setMutationError('La catégorie est requise.');
+      return;
+    }
+
+    if (!Number.isFinite(form.amount) || form.amount <= 0) {
+      setMutationError('Indiquez un montant valide.');
+      return;
+    }
+
+    const payload: InvoicePayload = {
+      ...form,
+      gst: form.gst ?? undefined,
+      qst: form.qst ?? undefined,
+      description: form.description?.trim() ? form.description.trim() : undefined
+    };
+
+    if (editingInvoiceId) {
+      updateMutation.mutate({ id: editingInvoiceId, payload });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
+
+  const isSaving = createMutation.isPending || updateMutation.isPending;
+
   return (
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">Factures</Typography>
-        <Button
-          variant="contained"
-          onClick={() => {
-            setOpen(true);
-            setMutationError(null);
-          }}
-        >
+        <Button variant="contained" onClick={handleOpenCreate}>
           Ajouter une facture
         </Button>
       </Stack>
+
+      {tableError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {tableError}
+        </Alert>
+      )}
 
       {isLoading ? (
         <Typography>Chargement...</Typography>
@@ -134,6 +255,7 @@ function InvoicesScreen() {
               <TableCell align="right">Montant (HT)</TableCell>
               <TableCell align="right">Taxes</TableCell>
               <TableCell align="right">Total TTC</TableCell>
+              <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -150,21 +272,34 @@ function InvoicesScreen() {
                 <TableCell align="right">
                   {formatter.format(invoice.amount + (invoice.gst ?? 0) + (invoice.qst ?? 0))}
                 </TableCell>
+                <TableCell align="right">
+                  <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                    <IconButton
+                      aria-label="modifier"
+                      size="small"
+                      onClick={() => handleEditInvoice(invoice)}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton
+                      aria-label="supprimer"
+                      size="small"
+                      color="error"
+                      onClick={() => handleDeleteInvoice(invoice)}
+                      disabled={deleteMutation.isPending && deletingInvoiceId === invoice.id}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
 
-      <Dialog
-        open={open}
-        onClose={() => {
-          setOpen(false);
-          setMutationError(null);
-        }}
-        fullWidth
-      >
-        <DialogTitle>Nouvelle facture</DialogTitle>
+      <Dialog open={open} onClose={handleCloseDialog} fullWidth>
+        <DialogTitle>{editingInvoiceId ? 'Modifier la facture' : 'Nouvelle facture'}</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           {mutationError && (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -275,26 +410,11 @@ function InvoicesScreen() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button
-            onClick={() => {
-              setOpen(false);
-              setMutationError(null);
-            }}
-          >
+          <Button onClick={handleCloseDialog} disabled={isSaving}>
             Annuler
           </Button>
-          <Button
-            onClick={() =>
-              createMutation.mutate({
-                ...form,
-                gst: form.gst ?? undefined,
-                qst: form.qst ?? undefined
-              })
-            }
-            variant="contained"
-            disabled={createMutation.isPending}
-          >
-            Enregistrer
+          <Button onClick={handleSubmit} variant="contained" disabled={isSaving}>
+            {editingInvoiceId ? 'Mettre à jour' : 'Enregistrer'}
           </Button>
         </DialogActions>
       </Dialog>

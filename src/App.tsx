@@ -18,6 +18,9 @@ import SpecialistSession from './screens/SpecialistSession';
 import MobileUploadScreen from './screens/MobileUpload';
 import RentalTaxScreen from './screens/RentalTax';
 import ValuationScreen from './screens/Valuation';
+import PersonalIncomeScreen from './screens/PersonalIncome';
+import FamilyWealthScreen from './screens/FamilyWealth';
+import FreezeSimulationScreen from './screens/FreezeSimulation';
 
 function App() {
   return (
@@ -41,7 +44,10 @@ function App() {
         <Route path="/valuation" element={<ValuationScreen />} />
         <Route path="/leveraged-buyback" element={<LeveragedBuybackScreen />} />
         <Route path="/advisors" element={<AdvisorsScreen />} />
-        <Route path="/rental-tax" element={<RentalTaxScreen />} />
+    <Route path="/rental-tax" element={<RentalTaxScreen />} />
+    <Route path="/personal-income" element={<PersonalIncomeScreen />} />
+    <Route path="/family-wealth" element={<FamilyWealthScreen />} />
+    <Route path="/freeze-simulation" element={<FreezeSimulationScreen />} />
         <Route path="/session" element={<SpecialistSession />} />
         <Route path="/invoices" element={<InvoicesScreen />} />
         <Route path="/revenues" element={<RevenuesScreen />} />
