@@ -8,13 +8,11 @@ const {
   mockUseSuccessionProgress,
   mockFetchAdvisorQuestions,
   mockEvaluateAdvisors,
-  mockAskAdvisorQuestion,
   mockPostAdvisorConversation
 } = vi.hoisted(() => ({
   mockUseSuccessionProgress: vi.fn(),
   mockFetchAdvisorQuestions: vi.fn(),
   mockEvaluateAdvisors: vi.fn(),
-  mockAskAdvisorQuestion: vi.fn(),
   mockPostAdvisorConversation: vi.fn()
 }));
 
@@ -25,7 +23,6 @@ vi.mock('../../api/freeze', () => ({
 vi.mock('../../api/advisors', () => ({
   fetchAdvisorQuestions: mockFetchAdvisorQuestions,
   evaluateAdvisors: mockEvaluateAdvisors,
-  askAdvisorQuestion: mockAskAdvisorQuestion,
   postAdvisorConversation: mockPostAdvisorConversation
 }));
 
@@ -95,7 +92,6 @@ describe('Advisors succession panel', () => {
     mockUseSuccessionProgress.mockReset();
     mockFetchAdvisorQuestions.mockReset();
     mockEvaluateAdvisors.mockReset();
-  mockAskAdvisorQuestion.mockReset();
   mockPostAdvisorConversation.mockReset();
     mockFetchAdvisorQuestions.mockResolvedValue([]);
     mockEvaluateAdvisors.mockResolvedValue(baseEvaluation);

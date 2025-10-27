@@ -42,8 +42,6 @@ import {
   AdvisorMetric,
   AdvisorQuestion,
   AdvisorResult,
-  AdvisorResponderId,
-  askAdvisorQuestion,
   postAdvisorConversation,
   evaluateAdvisors,
   fetchAdvisorQuestions
@@ -67,19 +65,6 @@ interface ConversationEntry {
   role: 'system' | 'user' | 'summary';
   content: string;
   meta?: { expertId?: string };
-}
-
-interface TargetedExchange {
-  id: string;
-  expertId: AdvisorResponderId;
-  expertLabel: string;
-  question: string;
-  answer: string;
-  keyPoints: string[];
-  followUps: string[];
-  metrics: AdvisorMetric[];
-  engineMode: AdvisorEngineMode;
-  engineNote?: string;
 }
 
 interface InterviewMessage {
@@ -179,17 +164,12 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [formError, setFormError] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
   const [selectedMetric, setSelectedMetric] = useState<AdvisorMetric | null>(null);
-  const [targetExpert, setTargetExpert] = useState<AdvisorResponderId>('group');
-  const [targetQuestion, setTargetQuestion] = useState('');
-  const [targetError, setTargetError] = useState<string | null>(null);
-  const [targetLoading, setTargetLoading] = useState(false);
-  const [targetHistory, setTargetHistory] = useState<TargetedExchange[]>([]);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-  const [speechActiveField, setSpeechActiveField] = useState<'main' | 'target' | null>(null);
+  const [speechActiveField, setSpeechActiveField] = useState<'main' | null>(null);
   const [interviewOpen, setInterviewOpen] = useState(false);
-  const [interviewExpert, setInterviewExpert] = useState<AdvisorInterviewerId>('fiscaliste');
+  const [interviewExpert] = useState<AdvisorInterviewerId>('planificateur');
   const [interviewMessages, setInterviewMessages] = useState<InterviewMessage[]>([]);
   const [interviewStarted, setInterviewStarted] = useState(false);
   const [interviewLoading, setInterviewLoading] = useState(false);
@@ -207,6 +187,8 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const interviewAnsweredRef = useRef<Set<string>>(new Set());
   const [gptHealth, setGptHealth] = useState<{ ok: boolean; provider: 'openai' | 'azure' | 'unknown'; message?: string } | null>(null);
   const [gptChecking, setGptChecking] = useState(false);
+  const [modeDialogOpen, setModeDialogOpen] = useState(true);
+  const [activeMode, setActiveMode] = useState<'assistant' | 'advisor' | null>(null);
 
   const askedQuestionsRef = useRef(new Set<string>());
 
@@ -418,6 +400,18 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       interviewAnsweredRef.current = new Set();
     }
   }, [interviewOpen]);
+
+  useEffect(() => {
+    if (activeMode === 'assistant') {
+      setInterviewOpen(true);
+    }
+  }, [activeMode]);
+
+  useEffect(() => {
+    if (!activeMode) {
+      setModeDialogOpen(true);
+    }
+  }, [activeMode]);
 
   function maybePushQuestion(question: AdvisorQuestion | null) {
     if (question && !askedQuestionsRef.current.has(question.id)) {
@@ -660,7 +654,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     setSpeechActiveField(null);
   }
 
-  function startSpeechCapture(field: 'main' | 'target') {
+  function startSpeechCapture(field: 'main') {
     if (typeof window === 'undefined') {
       return;
     }
@@ -690,11 +684,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
         if (!transcript) {
           return;
         }
-        if (field === 'main') {
-          setInputValue((previous) => (previous ? `${previous} ${transcript}` : transcript));
-        } else {
-          setTargetQuestion((previous) => (previous ? `${previous} ${transcript}` : transcript));
-        }
+        setInputValue((previous) => (previous ? `${previous} ${transcript}` : transcript));
       };
 
       recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
@@ -723,7 +713,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     }
   }
 
-  function handleSpeechToggle(field: 'main' | 'target') {
+  function handleSpeechToggle(field: 'main') {
     if (!speechSupported) {
       setSpeechError('La saisie vocale n’est pas prise en charge sur ce navigateur.');
       return;
@@ -735,74 +725,6 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     }
 
     startSpeechCapture(field);
-  }
-
-  async function handleTargetedAsk(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (targetLoading) {
-      return;
-    }
-
-    const trimmed = targetQuestion.trim();
-    if (!trimmed) {
-      setTargetError('Formulez une question avant de soumettre.');
-      return;
-    }
-
-    setTargetError(null);
-    setTargetLoading(true);
-    try {
-      const response = await askAdvisorQuestion({
-        expertId: targetExpert,
-        question: trimmed,
-        answers
-      });
-
-      const responderLabel = expertLabels[response.expertId] ?? response.expertId;
-      setConversation((prev) => [
-        ...prev,
-        {
-          id: generateId('target-question'),
-          role: 'user',
-          content: `[${responderLabel}] ${trimmed}`
-        },
-        {
-          id: generateId('target-answer'),
-          role: 'system',
-          content: response.answer,
-          meta: { expertId: response.expertId === 'group' ? undefined : response.expertId }
-        }
-      ]);
-
-      const exchange: TargetedExchange = {
-        id: generateId('target-exchange'),
-        expertId: response.expertId,
-        expertLabel: responderLabel,
-        question: trimmed,
-        answer: response.answer,
-        keyPoints: response.keyPoints,
-        followUps: response.followUps,
-        metrics: response.metrics,
-        engineMode: response.engine.mode,
-        engineNote: response.engine.note
-      };
-
-      setTargetHistory((prev) => [exchange, ...prev].slice(0, 5));
-      setTargetQuestion('');
-    } catch (err) {
-      console.error('Targeted question failed', err);
-      if (isUnauthorizedError(err)) {
-        onUnauthorized?.();
-        setTargetError('Acces non autorise. Merci de verifier votre cle.');
-      } else if (axios.isAxiosError(err)) {
-        const serverMessage = (err.response?.data as { error?: string } | undefined)?.error;
-        setTargetError(serverMessage ?? 'Impossible de traiter cette question pour le moment.');
-      } else {
-        setTargetError('Impossible de traiter cette question pour le moment.');
-      }
-    } finally {
-      setTargetLoading(false);
-    }
   }
 
   if (loading) {
@@ -828,6 +750,35 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           Répondez aux questions du fiscaliste, comptable, planificateur et avocat. Le coordinateur fusionne leurs
           conseils pour un plan d’action clair.
         </Typography>
+        {activeMode ? (
+          <Alert
+            severity="info"
+            sx={{ mt: 2 }}
+            action={
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setModeDialogOpen(true)}
+              >
+                Changer d’option
+              </Button>
+            }
+          >
+            Mode actif&nbsp;: {activeMode === 'assistant' ? 'Conseiller Assistant (GPT-5-mini-2025-01-13)' : 'Conseiller IA (GPT-5)'}
+          </Alert>
+        ) : (
+          <Alert
+            severity="info"
+            sx={{ mt: 2 }}
+            action={
+              <Button variant="contained" size="small" onClick={() => setModeDialogOpen(true)}>
+                Choisir
+              </Button>
+            }
+          >
+            Sélectionnez votre mode d’assistance pour démarrer.
+          </Alert>
+        )}
         <Stack spacing={1} sx={{ mt: 2 }}>
           {engineDisplayLabel && <Chip label={engineDisplayLabel} color="secondary" variant="outlined" />}
           {engineMeta?.note && <Alert severity="info">{engineMeta.note}</Alert>}
@@ -959,6 +910,18 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
                     <Chip key={field.questionId} label={field.label} color="warning" variant="outlined" size="small" />
                   ))}
                 </Stack>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => {
+                    setActiveMode('assistant');
+                    setModeDialogOpen(false);
+                    setInterviewOpen(true);
+                  }}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Utiliser le conseiller assistant
+                </Button>
               </>
             )}
             {speechError && <Typography variant="body2">{speechError}</Typography>}
@@ -966,186 +929,205 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
         </Alert>
       )}
 
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} alignItems="stretch">
-        <Paper
-          component="section"
-          role="log"
-          aria-live="polite"
-          aria-labelledby={conversationRegionLabel}
-          tabIndex={0}
-          elevation={3}
-          sx={{ flex: 1, p: 3, maxHeight: 480, overflowY: 'auto' }}
-        >
-          <Typography id={conversationRegionLabel} component="h2" sx={visuallyHidden}>
-            Historique de la conversation avec les experts IA
-          </Typography>
-          <Stack component="ul" spacing={2} sx={{ listStyle: 'none', p: 0, m: 0 }}>
-            {conversation.map((entry) => (
-              <Box
-                component="li"
-                key={entry.id}
-                sx={{
-                  alignSelf: entry.role === 'user' ? 'flex-end' : 'flex-start',
-                  backgroundColor: entry.role === 'user' ? 'primary.light' : 'grey.100',
-                  color: entry.role === 'user' ? 'primary.contrastText' : 'text.primary',
-                  px: 2,
-                  py: 1.5,
-                  borderRadius: 2,
-                  maxWidth: '85%',
-                  listStyle: 'none'
-                }}
-              >
-                <Typography variant="body2">{entry.content}</Typography>
-              </Box>
-            ))}
-            {!conversation.length && (
-              <Typography component="li" color="text.secondary" sx={{ listStyle: 'none' }}>
-                Les experts se préparent à poser leurs questions. Répondez pour recevoir vos premières recommandations.
-              </Typography>
-            )}
-          </Stack>
-        </Paper>
-
-        <Paper elevation={3} sx={{ width: { xs: '100%', md: 360 }, p: 3 }}>
-          {result?.completed ? (
-            <Stack spacing={2}>
-              <Typography variant="h6">Diagnostic terminé</Typography>
-              <Typography color="text.secondary">
-                Vous pouvez réinitialiser pour recommencer avec un autre scénario.
-              </Typography>
-              <Button
-                variant="outlined"
-                onClick={async () => {
-                  setAnswers([]);
-                  setConversation([]);
-                  askedQuestionsRef.current.clear();
-                  setResult(null);
-                  setInputValue('');
-                  setError(null);
-                  try {
-                    const evaluation = await evaluateWithPreferredEngine([]);
-                    setResult(evaluation);
-                    maybePushQuestion(evaluation.nextQuestion);
-                  } catch (err) {
-                    console.error(err);
-                    setError('Impossible de relancer la simulation.');
-                  }
-                }}
-              >
-                Relancer la simulation
-              </Button>
-            </Stack>
-          ) : currentQuestionDefinition ? (
-            <Stack component="form" spacing={2} onSubmit={handleSubmit}>
-              <Typography variant="h6">Question suivante</Typography>
-              <Typography variant="subtitle1">{currentQuestionDefinition.label}</Typography>
-              {currentQuestionDefinition.description && (
-                <Typography variant="body2" color="text.secondary">
-                  {currentQuestionDefinition.description}
+      {activeMode === 'advisor' && (
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} alignItems="stretch">
+          <Paper
+            component="section"
+            role="log"
+            aria-live="polite"
+            aria-labelledby={conversationRegionLabel}
+            tabIndex={0}
+            elevation={3}
+            sx={{ flex: 1, p: 3, maxHeight: 480, overflowY: 'auto' }}
+          >
+            <Typography id={conversationRegionLabel} component="h2" sx={visuallyHidden}>
+              Historique de la conversation avec les experts IA
+            </Typography>
+            <Stack component="ul" spacing={2} sx={{ listStyle: 'none', p: 0, m: 0 }}>
+              {conversation.map((entry) => (
+                <Box
+                  component="li"
+                  key={entry.id}
+                  sx={{
+                    alignSelf: entry.role === 'user' ? 'flex-end' : 'flex-start',
+                    backgroundColor: entry.role === 'user' ? 'primary.light' : 'grey.100',
+                    color: entry.role === 'user' ? 'primary.contrastText' : 'text.primary',
+                    px: 2,
+                    py: 1.5,
+                    borderRadius: 2,
+                    maxWidth: '85%',
+                    listStyle: 'none'
+                  }}
+                >
+                  <Typography variant="body2">{entry.content}</Typography>
+                </Box>
+              ))}
+              {!conversation.length && (
+                <Typography component="li" color="text.secondary" sx={{ listStyle: 'none' }}>
+                  Les experts se préparent à poser leurs questions. Répondez pour recevoir vos premières recommandations.
                 </Typography>
               )}
+            </Stack>
+          </Paper>
 
-              {currentQuestionDefinition.type === 'select' ? (
-                <TextField
-                  select
-                  label="Choix"
-                  value={inputValue}
-                  onChange={(event) => setInputValue(event.target.value)}
-                  required
-                  fullWidth
-                  helperText={currentQuestionDefinition.description}
+          <Paper elevation={3} sx={{ width: { xs: '100%', md: 360 }, p: 3 }}>
+            <Stack spacing={2}>
+              <Alert severity="info" variant="outlined">
+                Besoin d’une précision ?
+                <Button
+                  variant="text"
+                  size="small"
+                  onClick={() => {
+                    setActiveMode('assistant');
+                    setModeDialogOpen(false);
+                    setInterviewOpen(true);
+                  }}
+                  sx={{ ml: 1 }}
                 >
-                  {currentQuestionDefinition.options?.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              ) : (
-                (() => {
-                  const isNumberQuestion = currentQuestionDefinition.type === 'number';
-                  const questionUncertainty = uncertainty.find(
-                    (field) => field.questionId === currentQuestionDefinition.id
-                  );
-                  let helperText =
-                    formError ??
-                    (isNumberQuestion
-                      ? "Inscrivez un montant estimé (ex. 250000) ou tapez 'je ne sais pas'."
-                      : currentQuestionDefinition.description);
-                  if (!formError && questionUncertainty) {
-                    helperText = helperText
-                      ? `${helperText} | Réponse actuelle à confirmer : vous pourrez préciser ce point plus tard.`
-                      : 'Réponse actuelle à confirmer : vous pourrez préciser ce point plus tard.';
-                  }
-                  return (
-                    <TextField
-                      label="Votre réponse"
-                      placeholder={currentQuestionDefinition.placeholder}
-                      type="text"
-                      inputProps={
-                        isNumberQuestion
-                          ? {
-                              inputMode: 'decimal',
-                              'aria-label': 'Réponse numérique ou texte'
-                            }
-                          : undefined
+                  Ouvrir le conseiller assistant
+                </Button>
+              </Alert>
+              {result?.completed ? (
+                <Stack spacing={2}>
+                  <Typography variant="h6">Diagnostic terminé</Typography>
+                  <Typography color="text.secondary">
+                    Vous pouvez réinitialiser pour recommencer avec un autre scénario.
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    onClick={async () => {
+                      setAnswers([]);
+                      setConversation([]);
+                      askedQuestionsRef.current.clear();
+                      setResult(null);
+                      setInputValue('');
+                      setError(null);
+                      try {
+                        const evaluation = await evaluateWithPreferredEngine([]);
+                        setResult(evaluation);
+                        maybePushQuestion(evaluation.nextQuestion);
+                      } catch (err) {
+                        console.error(err);
+                        setError('Impossible de relancer la simulation.');
                       }
+                    }}
+                  >
+                    Relancer la simulation
+                  </Button>
+                </Stack>
+              ) : currentQuestionDefinition ? (
+                <Stack component="form" spacing={2} onSubmit={handleSubmit}>
+                  <Typography variant="h6">Question suivante</Typography>
+                  <Typography variant="subtitle1">{currentQuestionDefinition.label}</Typography>
+                  {currentQuestionDefinition.description && (
+                    <Typography variant="body2" color="text.secondary">
+                      {currentQuestionDefinition.description}
+                    </Typography>
+                  )}
+
+                  {currentQuestionDefinition.type === 'select' ? (
+                    <TextField
+                      select
+                      label="Choix"
                       value={inputValue}
                       onChange={(event) => setInputValue(event.target.value)}
                       required
                       fullWidth
-                      helperText={helperText}
-                      error={Boolean(formError)}
-                      InputProps={
-                        speechSupported
-                          ? {
-                              endAdornment: (
-                                <InputAdornment position="end">
-                                  <Tooltip
-                                    title={
-                                      listening && speechActiveField === 'main'
-                                        ? 'Arrêter la dictée'
-                                        : 'Dicter au micro'
-                                    }
-                                  >
-                                    <span>
-                                      <IconButton
-                                        onClick={() => handleSpeechToggle('main')}
-                                        color={listening && speechActiveField === 'main' ? 'primary' : 'default'}
-                                        aria-label="Saisie vocale pour la réponse"
-                                        size="small"
-                                        disabled={submitting}
-                                      >
-                                        <KeyboardVoiceIcon fontSize="small" />
-                                      </IconButton>
-                                    </span>
-                                  </Tooltip>
-                                </InputAdornment>
-                              )
-                            }
-                          : undefined
+                      helperText={currentQuestionDefinition.description}
+                    >
+                      {currentQuestionDefinition.options?.map((option) => (
+                        <MenuItem key={option.value} value={option.value}>
+                          {option.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  ) : (
+                    (() => {
+                      const isNumberQuestion = currentQuestionDefinition.type === 'number';
+                      const questionUncertainty = uncertainty.find(
+                        (field) => field.questionId === currentQuestionDefinition.id
+                      );
+                      let helperText =
+                        formError ??
+                        (isNumberQuestion
+                          ? "Inscrivez un montant estimé (ex. 250000) ou tapez 'je ne sais pas'."
+                          : currentQuestionDefinition.description);
+                      if (!formError && questionUncertainty) {
+                        helperText = helperText
+                          ? `${helperText} | Réponse actuelle à confirmer : vous pourrez préciser ce point plus tard.`
+                          : 'Réponse actuelle à confirmer : vous pourrez préciser ce point plus tard.';
                       }
-                    />
-                  );
-                })()
-              )}
+                      return (
+                        <TextField
+                          label="Votre réponse"
+                          placeholder={currentQuestionDefinition.placeholder}
+                          type="text"
+                          inputProps={
+                            isNumberQuestion
+                              ? {
+                                  inputMode: 'decimal',
+                                  'aria-label': 'Réponse numérique ou texte'
+                                }
+                              : undefined
+                          }
+                          value={inputValue}
+                          onChange={(event) => setInputValue(event.target.value)}
+                          required
+                          fullWidth
+                          helperText={helperText}
+                          error={Boolean(formError)}
+                          InputProps={
+                            speechSupported
+                              ? {
+                                  endAdornment: (
+                                    <InputAdornment position="end">
+                                      <Tooltip
+                                        title={
+                                          listening && speechActiveField === 'main'
+                                            ? 'Arrêter la dictée'
+                                            : 'Dicter au micro'
+                                        }
+                                      >
+                                        <span>
+                                          <IconButton
+                                            onClick={() => handleSpeechToggle('main')}
+                                            color={listening && speechActiveField === 'main' ? 'primary' : 'default'}
+                                            aria-label="Saisie vocale pour la réponse"
+                                            size="small"
+                                            disabled={submitting}
+                                          >
+                                            <KeyboardVoiceIcon fontSize="small" />
+                                          </IconButton>
+                                        </span>
+                                      </Tooltip>
+                                    </InputAdornment>
+                                  )
+                                }
+                              : undefined
+                          }
+                        />
+                      );
+                    })()
+                  )}
 
-              <Button type="submit" variant="contained" disabled={submitting} startIcon={<QuestionAnswerIcon />}>
-                Envoyer
-              </Button>
+                  <Button type="submit" variant="contained" disabled={submitting} startIcon={<QuestionAnswerIcon />}>
+                    Envoyer
+                  </Button>
+                </Stack>
+              ) : (
+                <Typography color="text.secondary">En attente des réponses…</Typography>
+              )}
             </Stack>
-          ) : (
-            <Typography color="text.secondary">En attente des réponses…</Typography>
-          )}
-        </Paper>
-      </Stack>
+          </Paper>
+        </Stack>
+      )}
 
       <Paper elevation={3} sx={{ p: 3 }}>
         <Stack spacing={2}>
-          <Typography variant="h5">Entretien guidé</Typography>
+          <Typography variant="h5">Conseiller Assistant (GPT-5-mini-2025-01-13)</Typography>
           <Typography variant="body2" color="text.secondary">
-            Sélectionnez l’expert qui pilotera l’entretien et répondra à vos questions tout en collectant vos
-            informations personnelles.
+            Utilisez cet assistant pour collecter toutes les informations nécessaires. Il détecte les données manquantes
+            et vous invite à les préciser dans la zone de réponse.
           </Typography>
           {priorityQuestionSummary && (
             <Alert severity="info" variant="outlined">
@@ -1153,201 +1135,102 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
             </Alert>
           )}
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
-            <TextField
-              select
-              label="Expert animateur"
-              value={interviewExpert}
-              onChange={(event) => setInterviewExpert(event.target.value as AdvisorInterviewerId)}
-              sx={{ width: { xs: '100%', sm: 260 } }}
-            >
-              {(['fiscaliste', 'comptable', 'planificateur', 'avocat'] as AdvisorInterviewerId[]).map((option) => (
-                <MenuItem key={option} value={option}>
-                  {expertLabels[option] ?? option}
-                </MenuItem>
-              ))}
-            </TextField>
             <Button
               variant="contained"
               startIcon={<PsychologyIcon />}
-              onClick={() => setInterviewOpen(true)}
+              onClick={() => {
+                setActiveMode('assistant');
+                setModeDialogOpen(false);
+                setInterviewOpen(true);
+              }}
             >
-              Choisir cet expert
+              Ouvrir l’assistant IA
+            </Button>
+            <Button variant="outlined" onClick={() => setModeDialogOpen(true)}>
+              Changer d’option
             </Button>
           </Stack>
         </Stack>
       </Paper>
 
-      <Paper elevation={3} sx={{ p: 3 }}>
-        <Stack spacing={2}>
-          <Typography variant="h5">Questions ciblees</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Choisissez un expert ou le comite IA pour obtenir une reponse ciblee basee sur vos reponses actuelles.
-          </Typography>
-          {targetError && <Alert severity="error">{targetError}</Alert>}
-          <Stack component="form" spacing={2} onSubmit={handleTargetedAsk}>
-            <TextField
-              select
-              label="Destinataire"
-              value={targetExpert}
-              onChange={(event) => setTargetExpert(event.target.value as AdvisorResponderId)}
-              helperText="Le comite IA combine les quatre experts."
-              required
-              fullWidth
-            >
-              {(['group', 'fiscaliste', 'comptable', 'planificateur', 'avocat'] as AdvisorResponderId[]).map((option) => (
-                <MenuItem key={option} value={option}>
-                  {expertLabels[option] ?? option}
-                </MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Votre question ciblee"
-              value={targetQuestion}
-              onChange={(event) => setTargetQuestion(event.target.value)}
-              multiline
-              minRows={2}
-              required
-              fullWidth
-              helperText="Precisez le contexte ou la decision a clarifier."
-              InputProps={
-                speechSupported
-                  ? {
-                      endAdornment: (
-                        <InputAdornment position="end">
-                          <Tooltip
-                            title={
-                              listening && speechActiveField === 'target'
-                                ? 'Arrêter la dictée'
-                                : 'Dicter au micro'
-                            }
-                          >
-                            <span>
-                              <IconButton
-                                onClick={() => handleSpeechToggle('target')}
-                                color={listening && speechActiveField === 'target' ? 'primary' : 'default'}
-                                aria-label="Saisie vocale pour la question ciblee"
-                                size="small"
-                                disabled={targetLoading}
-                              >
-                                <KeyboardVoiceIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        </InputAdornment>
-                      )
-                    }
-                  : undefined
-              }
-            />
-            <Stack direction="row" spacing={2}>
-              <Button type="submit" variant="contained" disabled={targetLoading} startIcon={<QuestionAnswerIcon />}>
-                {targetLoading ? 'Analyse en cours...' : 'Obtenir une reponse ciblee'}
-              </Button>
-              <Button
-                type="button"
-                variant="text"
-                disabled={targetLoading}
-                onClick={() => {
-                  setTargetQuestion('');
-                  setTargetError(null);
-                }}
-              >
-                Effacer
-              </Button>
-            </Stack>
-          </Stack>
 
-          {targetHistory.length > 0 && (
-            <Stack spacing={2} sx={{ mt: 1 }}>
-              {targetHistory.map((exchange) => (
-                <Paper key={exchange.id} variant="outlined" sx={{ p: 2 }}>
-                  <Stack spacing={1.5}>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <Chip label={exchange.expertLabel} color="primary" size="small" />
-                      <Chip
-                        label={exchange.engineMode === 'gpt' ? 'GPT' : 'Heuristique'}
-                        size="small"
-                        color={exchange.engineMode === 'gpt' ? 'secondary' : 'default'}
-                      />
-                      {exchange.engineNote && (
-                        <Typography variant="caption" color="text.secondary">
-                          {exchange.engineNote}
-                        </Typography>
-                      )}
-                    </Stack>
-                    <Typography variant="subtitle2">Question</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {exchange.question}
-                    </Typography>
-                    <Typography variant="subtitle2">Reponse</Typography>
-                    <Typography variant="body2">{exchange.answer}</Typography>
-                    {exchange.keyPoints.length > 0 && (
-                      <Box>
-                        <Typography variant="subtitle2">Points a retenir</Typography>
-                        <List dense>
-                          {exchange.keyPoints.map((point, index) => (
-                            <ListItem key={index} disableGutters>
-                              <ListItemIcon sx={{ minWidth: 32 }}>
-                                <TipsAndUpdatesIcon fontSize="small" color="action" />
-                              </ListItemIcon>
-                              <ListItemText primary={point} primaryTypographyProps={{ variant: 'body2' }} />
-                            </ListItem>
-                          ))}
-                        </List>
-                      </Box>
-                    )}
-                    {exchange.followUps.length > 0 && (
-                      <Box>
-                        <Typography variant="subtitle2">Suivis proposes</Typography>
-                        <List dense>
-                          {exchange.followUps.map((item, index) => (
-                            <ListItem key={index} disableGutters>
-                              <ListItemIcon sx={{ minWidth: 32 }}>
-                                <TaskAltIcon color="success" />
-                              </ListItemIcon>
-                              <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2' }} />
-                            </ListItem>
-                          ))}
-                        </List>
-                      </Box>
-                    )}
-                    {exchange.metrics.length > 0 && (
-                      <Box>
-                        <Typography variant="subtitle2">Indicateurs associes</Typography>
-                        <Stack spacing={1}>
-                          {exchange.metrics.map((metric) => (
-                            <Typography key={metric.id} variant="body2">
-                              {metric.label}: {metric.value}
-                            </Typography>
-                          ))}
-                        </Stack>
-                      </Box>
-                    )}
-                  </Stack>
-                </Paper>
-              ))}
-            </Stack>
+      <Dialog
+        open={modeDialogOpen}
+        onClose={() => {
+          if (activeMode) {
+            setModeDialogOpen(false);
+          }
+        }}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Choisir le conseiller IA</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Paper
+              variant="outlined"
+              sx={{ p: 2, borderColor: activeMode === 'assistant' ? 'primary.main' : undefined }}
+            >
+              <Stack spacing={1.5}>
+                <Typography variant="h6">Conseiller Assistant</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Collecte des informations manquantes via GPT-5-mini-2025-01-13. L’assistant vous demande de préciser
+                  les éléments qu’il ne connaît pas.
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="contained"
+                    onClick={() => {
+                      setActiveMode('assistant');
+                      setModeDialogOpen(false);
+                      setInterviewOpen(true);
+                    }}
+                  >
+                    Ouvrir l’assistant
+                  </Button>
+                </Stack>
+              </Stack>
+            </Paper>
+            <Paper
+              variant="outlined"
+              sx={{ p: 2, borderColor: activeMode === 'advisor' ? 'primary.main' : undefined }}
+            >
+              <Stack spacing={1.5}>
+                <Typography variant="h6">Conseiller IA</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Analyse stratégique générée par GPT-5. Vérifie les informations manquantes et redirige vers
+                  l’assistant si nécessaire.
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    onClick={() => {
+                      setActiveMode('advisor');
+                      setModeDialogOpen(false);
+                    }}
+                  >
+                    Consulter le diagnostic
+                  </Button>
+                </Stack>
+              </Stack>
+            </Paper>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          {activeMode && (
+            <Button onClick={() => setModeDialogOpen(false)}>Fermer</Button>
           )}
-        </Stack>
-      </Paper>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={interviewOpen} onClose={() => setInterviewOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Entretien guidé avec un expert</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2}>
-            <TextField
-              select
-              label="Expert"
-              value={interviewExpert}
-              onChange={(event) => setInterviewExpert(event.target.value as AdvisorInterviewerId)}
-              disabled={interviewStarted && !interviewCompleted}
-            >
-              {(['fiscaliste', 'comptable', 'planificateur', 'avocat'] as AdvisorInterviewerId[]).map((option) => (
-                <MenuItem key={option} value={option}>
-                  {expertLabels[option] ?? option}
-                </MenuItem>
-              ))}
-            </TextField>
+            <Alert severity="info" variant="outlined">
+              Conseiller Assistant piloté par {expertLabels[interviewExpert]}. Modèle : GPT-5-mini-2025-01-13.
+            </Alert>
 
             {interviewError && <Alert severity="error">{interviewError}</Alert>}
 
@@ -1468,7 +1351,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
         </DialogActions>
       </Dialog>
 
-      {result?.completed && (
+      {activeMode === 'advisor' && result?.completed && (
         <Stack spacing={4}>
           <Box>
             <Typography variant="h5" gutterBottom>
