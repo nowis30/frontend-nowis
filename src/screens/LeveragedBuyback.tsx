@@ -258,12 +258,14 @@ export default function LeveragedBuybackScreen() {
       return;
     }
 
+    const companyId = selectedCompanyId ? Number(selectedCompanyId) : undefined;
+
     const payload: LeveragedBuybackPayload = {
       ...basePayload,
       label: form.label.trim() ? form.label.trim() : null,
       notes: form.notes.trim() ? form.notes.trim() : null,
       approved,
-      companyId: selectedCompanyId ? Number(selectedCompanyId) : null
+      companyId
     };
 
     createScenario.mutate(payload, {
@@ -297,12 +299,14 @@ export default function LeveragedBuybackScreen() {
       return;
     }
 
+    const companyId = selectedCompanyId ? Number(selectedCompanyId) : undefined;
+
     const payload: LeveragedBuybackPayload = {
       ...basePayload,
       label: form.label.trim() ? form.label.trim() : null,
       notes: form.notes.trim() ? form.notes.trim() : null,
       approved,
-      companyId: selectedCompanyId ? Number(selectedCompanyId) : null,
+      companyId,
       companyName: selectedCompanyName ?? undefined
     };
 
