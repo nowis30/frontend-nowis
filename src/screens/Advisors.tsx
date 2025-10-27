@@ -148,6 +148,7 @@ function resolvePreferredEngine(): AdvisorEngineMode | undefined {
 }
 
 const preferredEngine = resolvePreferredEngine();
+const MANUAL_FLOW_ENABLED = false;
 
 function evaluateWithPreferredEngine(answers: AdvisorAnswer[]) {
   return evaluateAdvisors(answers, preferredEngine ? { engine: preferredEngine } : undefined);
@@ -414,6 +415,9 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   }, [activeMode]);
 
   function maybePushQuestion(question: AdvisorQuestion | null) {
+    if (!MANUAL_FLOW_ENABLED) {
+      return;
+    }
     if (question && !askedQuestionsRef.current.has(question.id)) {
       askedQuestionsRef.current.add(question.id);
       setConversation((prev) => [
@@ -589,6 +593,9 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!MANUAL_FLOW_ENABLED) {
+      return;
+    }
     if (!currentQuestion || submitting) {
       return;
     }
@@ -736,7 +743,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     );
   }
 
-  const currentQuestionDefinition = currentQuestion
+  const currentQuestionDefinition = MANUAL_FLOW_ENABLED && currentQuestion
     ? questions.find((question) => question.id === currentQuestion.id) ?? currentQuestion
     : null;
 
@@ -747,8 +754,8 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           Comité d’experts IA
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Répondez aux questions du fiscaliste, comptable, planificateur et avocat. Le coordinateur fusionne leurs
-          conseils pour un plan d’action clair.
+          L’assistant IA recueille les informations et pré-remplit votre dossier (portefeuille, fiscalité) avant de
+          lancer le diagnostic combiné des experts fiscal, comptable, planificateur et avocat.
         </Typography>
         {activeMode ? (
           <Alert
@@ -1015,7 +1022,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
                     Relancer la simulation
                   </Button>
                 </Stack>
-              ) : currentQuestionDefinition ? (
+              ) : MANUAL_FLOW_ENABLED && currentQuestionDefinition ? (
                 <Stack component="form" spacing={2} onSubmit={handleSubmit}>
                   <Typography variant="h6">Question suivante</Typography>
                   <Typography variant="subtitle1">{currentQuestionDefinition.label}</Typography>
@@ -1115,7 +1122,10 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
                   </Button>
                 </Stack>
               ) : (
-                <Typography color="text.secondary">En attente des réponses…</Typography>
+                <Typography color="text.secondary">
+                  Les questions préconstruites sont désactivées. Utilisez le conseiller assistant pour compléter les
+                  informations nécessaires ; le diagnostic IA se mettra à jour automatiquement.
+                </Typography>
               )}
             </Stack>
           </Paper>
