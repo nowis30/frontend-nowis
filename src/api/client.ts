@@ -10,17 +10,24 @@ const envBaseUrl =
 
 // On Vercel on s'appuie sur le rewrite /api -> backend Render, sinon on retombe sur Render.
 const resolvedBaseUrl = (() => {
-  if (envBaseUrl) {
-    return envBaseUrl.replace(/\/$/, '');
-  }
-
   if (typeof window !== 'undefined') {
     const { hostname } = window.location;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.vercel.app')) {
+    // Sur Vercel, on force l'utilisation de l'URL relative 
+    // pour profiter du rewrite `/api` défini dans vercel.json.
+    if (hostname.endsWith('.vercel.app')) {
+      return '';
+    }
+    // En local (vite dev server), on utilise aussi le proxy `/api`.
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return '';
     }
   }
 
+  // Hors Vercel et hors local, on laisse une porte de sortie via env,
+  // sinon fallback Render.
+  if (envBaseUrl) {
+    return envBaseUrl.replace(/\/$/, '');
+  }
   return 'https://backend-nowis-1.onrender.com';
 })();
 

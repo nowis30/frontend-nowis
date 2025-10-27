@@ -10,12 +10,14 @@ import {
   Typography
 } from '@mui/material';
 import { NavLink, Outlet } from 'react-router-dom';
+import BackendStatus from './BackendStatus';
 
 const links = [
   { to: '/dashboard', label: 'Tableau de bord' },
   { to: '/reports', label: 'Rapports' },
   { to: '/rental-tax', label: 'Fiscalité locative' },
-  { to: '/leveraged-buyback', label: 'Simulation levier' },
+  { to: '/leveraged-buyback', label: 'Rachat levier' },
+  { to: '/leverage', label: 'Effet de levier' },
   { to: '/family-wealth', label: 'Valeur nette familiale' },
   { to: '/valuation', label: 'Valeur familiale' },
   { to: '/freeze-simulation', label: 'Gel successoral' },
@@ -57,6 +59,7 @@ export function AppLayout({ children }: PropsWithChildren) {
               Nowis IA – Gestion immobilière
             </Typography>
             <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+              <BackendStatus />
               {primaryLinks.map((link) => (
                 <Button
                   key={link.to}
