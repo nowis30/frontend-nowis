@@ -12,6 +12,7 @@ import CompaniesScreen from './screens/Companies';
 import TeamScreen from './screens/Team';
 import ReportsScreen from './screens/Reports';
 import LeveragedBuybackScreen from './screens/LeveragedBuyback';
+import LeverageScreen from './screens/Leverage';
 import AdvisorsScreen from './screens/Advisors';
 import AdvisorPortalPage from './screens/AdvisorPortal';
 import SpecialistSession from './screens/SpecialistSession';
@@ -42,7 +43,8 @@ function App() {
         <Route path="/team" element={<TeamScreen />} />
         <Route path="/reports" element={<ReportsScreen />} />
         <Route path="/valuation" element={<ValuationScreen />} />
-        <Route path="/leveraged-buyback" element={<LeveragedBuybackScreen />} />
+  <Route path="/leveraged-buyback" element={<LeveragedBuybackScreen />} />
+  <Route path="/leverage" element={<LeverageScreen />} />
         <Route path="/advisors" element={<AdvisorsScreen />} />
     <Route path="/rental-tax" element={<RentalTaxScreen />} />
     <Route path="/personal-income" element={<PersonalIncomeScreen />} />

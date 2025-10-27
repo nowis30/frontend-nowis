@@ -1,9 +1,11 @@
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, useMemo, useState } from 'react';
+import type { ChipProps } from '@mui/material';
 import {
   Alert,
   Box,
   Button,
   Checkbox,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -13,8 +15,13 @@ import {
   FormControlLabel,
   Grid,
   IconButton,
+  LinearProgress,
+  List,
+  ListItem,
+  ListItemText,
   MenuItem,
   Paper,
+  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -32,9 +39,11 @@ import {
   useCreateFreezeScenario,
   useDeleteFreezeScenario,
   useRunFreezeSimulation,
+  useSuccessionProgress,
   type FreezeScenarioPayload,
   type FreezeSimulationInputs,
-  type FreezeSimulationResult
+  type FreezeSimulationResult,
+  type SuccessionStepStatus
 } from '../api/freeze';
 
 type ScenarioFormState = FreezeScenarioPayload;
@@ -59,7 +68,7 @@ function createInitialScenarioForm(): ScenarioFormState {
     preferredDividendRatePercent: 4,
     redemptionYears: 20,
     notes: null
-  };
+  } as const;
 }
 
 function createInitialSimulationForm(): SimulationFormState {
@@ -74,9 +83,45 @@ function createInitialSimulationForm(): SimulationFormState {
   };
 }
 
+const moneyFormatter = new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' });
+
+function formatMoney(value: number): string {
+  return moneyFormatter.format(value);
+}
+
+function humanizeMetricKey(key: string): string {
+  const spaced = key.replace(/([A-Z])/g, ' $1').trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function formatMetricValue(value: unknown): string {
+  if (typeof value === 'number') {
+    return formatMoney(value);
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  if (value === null || value === undefined) {
+    return 'N/A';
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export default function FreezeSimulationScreen() {
   const assetsQuery = useFreezeAssets();
   const scenariosQuery = useFreezeScenarios();
+  const progressQuery = useSuccessionProgress();
 
   const createScenario = useCreateFreezeScenario();
   const deleteScenario = useDeleteFreezeScenario();
@@ -89,6 +134,17 @@ export default function FreezeSimulationScreen() {
   const [simulationForm, setSimulationForm] = useState<SimulationFormState>(createInitialSimulationForm());
   const [simulationResult, setSimulationResult] = useState<FreezeSimulationResult | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
+
+  const statusConfig = useMemo<Record<SuccessionStepStatus, { label: string; color: ChipProps['color'] }>>(
+    () => ({
+      todo: { label: 'À faire', color: 'default' },
+      in_progress: { label: 'En cours', color: 'warning' },
+      done: { label: 'Terminé', color: 'success' }
+    }),
+    []
+  );
+
+  const progressData = progressQuery.data;
 
   const handleOpenScenarioDialog = () => {
     setScenarioForm(createInitialScenarioForm());
@@ -171,12 +227,12 @@ export default function FreezeSimulationScreen() {
     setSimulationResult(null);
 
     if (!simulationForm.scenarioId) {
-      setSimulationError('Choisis un scénario de gel avant de lancer la simulation.');
+  setSimulationError('Choisis un scénario de gel avant de lancer la simulation.');
       return;
     }
 
     if (simulationForm.assetIds.length === 0) {
-      setSimulationError('Sélectionne au moins un actif à geler.');
+  setSimulationError('Sélectionne au moins un actif à geler.');
       return;
     }
 
@@ -195,13 +251,111 @@ export default function FreezeSimulationScreen() {
         setSimulationResult(result);
       },
       onError: () => {
-        setSimulationError('La simulation ne peut pas être calculée pour le moment.');
+  setSimulationError('La simulation ne peut pas être calculée pour le moment.');
       }
     });
   };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Paper sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ md: 'center' }}>
+          <Stack spacing={0.5}>
+            <Typography variant="h5">Parcours succession</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Suis l’avancement des données, scénarios et simulations pour livrer un plan professionnel.
+            </Typography>
+          </Stack>
+          {progressData && (
+            <Chip
+              label={`${Math.round(progressData.completionRatio * 100)} % complété`}
+              color={progressData.completionRatio >= 1 ? 'success' : 'primary'}
+            />
+          )}
+        </Stack>
+
+        {progressQuery.isLoading ? (
+          <Skeleton variant="rectangular" height={12} sx={{ borderRadius: 999 }} />
+        ) : progressData ? (
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(progressData.completionRatio * 100, 100)}
+            sx={{ height: 10, borderRadius: 999 }}
+          />
+        ) : (
+          <Alert severity="warning">Impossible de récupérer le suivi pour le moment.</Alert>
+        )}
+
+        {progressData && (
+          <Stack spacing={2}>
+            <Alert severity={progressData.completionRatio >= 1 ? 'success' : 'info'}>
+              <strong>{progressData.nextAction.label}</strong>
+              <br />
+              {progressData.nextAction.suggestion}
+            </Alert>
+
+            <Grid container spacing={2}>
+              {progressData.steps.map((step) => {
+                const config = statusConfig[step.status];
+                return (
+                  <Grid item xs={12} md={6} key={step.id}>
+                    <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+                      <Stack spacing={1.5}>
+                        <Stack direction="row" spacing={1} justifyContent="space-between" alignItems="center">
+                          <Typography variant="subtitle1">{step.label}</Typography>
+                          <Chip label={config.label} color={config.color} size="small" />
+                        </Stack>
+                        {step.summary && (
+                          <Typography variant="body2" color="text.secondary">
+                            {step.summary}
+                          </Typography>
+                        )}
+                        {step.blockers && step.blockers.length > 0 && (
+                          <Alert severity="warning" variant="outlined">
+                            <Typography variant="subtitle2" gutterBottom>
+                              Bloqueurs à lever
+                            </Typography>
+                            <List dense disablePadding>
+                              {step.blockers.map((blocker, index) => (
+                                <ListItem key={`${step.id}-blocker-${index}`} disableGutters sx={{ py: 0 }}>
+                                  <ListItemText primary={blocker} primaryTypographyProps={{ variant: 'body2' }} />
+                                </ListItem>
+                              ))}
+                            </List>
+                          </Alert>
+                        )}
+                      </Stack>
+                    </Paper>
+                  </Grid>
+                );
+              })}
+            </Grid>
+
+            {progressData.latestSimulation && (
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle1">Dernière simulation</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Générée le {new Date(progressData.latestSimulation.generatedAt).toLocaleDateString('fr-CA')} - Horizon {progressData.latestSimulation.inputs.targetFreezeYear}
+                  </Typography>
+                  {progressData.latestSimulation.metrics ? (
+                    <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+                      {Object.entries(progressData.latestSimulation.metrics).map(([key, value]) => (
+                        <Chip key={key} label={`${humanizeMetricKey(key)}: ${formatMetricValue(value)}`} size="small" variant="outlined" />
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      Les métriques détaillées seront disponibles après la prochaine simulation.
+                    </Typography>
+                  )}
+                </Stack>
+              </Paper>
+            )}
+          </Stack>
+        )}
+      </Paper>
+
       <Stack spacing={0.5}>
         <Typography variant="h4">Simulateur de gel successoral</Typography>
         <Typography variant="body2" color="text.secondary">
@@ -261,7 +415,7 @@ export default function FreezeSimulationScreen() {
       </Paper>
 
       <Paper sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <Typography variant="h6">Paramètres de simulation</Typography>
+  <Typography variant="h6">Paramètres de simulation</Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
             <TextField
@@ -319,7 +473,7 @@ export default function FreezeSimulationScreen() {
           </Grid>
           <Grid item xs={12} md={4}>
             <TextField
-              label="Taux marginal d'impôt %"
+              label="Taux marginal d’impôt %"
               type="number"
               value={simulationForm.marginalTaxRatePercent}
               onChange={handleSimulationFieldChange('marginalTaxRatePercent')}
@@ -361,10 +515,10 @@ export default function FreezeSimulationScreen() {
                     <Stack spacing={1}>
                       <Typography variant="subtitle2">{asset.label}</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Valeur actuelle : {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(asset.fairMarketValue)}
+                        Valeur actuelle : {formatMoney(asset.fairMarketValue)}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Croissance : {asset.annualGrowthPercent.toFixed(1)} % · Rendement : {asset.distributionYieldPercent.toFixed(1)} %
+                        Croissance : {asset.annualGrowthPercent.toFixed(1)} % - Rendement : {asset.distributionYieldPercent.toFixed(1)} %
                       </Typography>
                       <FormControlLabel
                         control={
@@ -386,11 +540,7 @@ export default function FreezeSimulationScreen() {
         {simulationError && <Alert severity="error">{simulationError}</Alert>}
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
-          <Button
-            variant="contained"
-            onClick={handleRunSimulation}
-            disabled={runSimulation.isPending}
-          >
+          <Button variant="contained" onClick={handleRunSimulation} disabled={runSimulation.isPending}>
             Lancer la simulation
           </Button>
           {runSimulation.isPending && <CircularProgress size={20} />}
@@ -399,120 +549,102 @@ export default function FreezeSimulationScreen() {
 
       {simulationResult && (
         <Paper sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Typography variant="h6">Résultats de la simulation</Typography>
+          <Typography variant="h6">Resultats de la simulation</Typography>
           <Grid container spacing={2}>
             <Grid item xs={12} md={4}>
               <Paper variant="outlined" sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Valeur des actions privilégiées
+                  Valeur des actions privilegiees
                 </Typography>
-                <Typography variant="h6">
-                  {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(simulationResult.preferredShareValue)}
-                </Typography>
+                <Typography variant="h6">{formatMoney(simulationResult.preferredShareValue)}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={12} md={4}>
               <Paper variant="outlined" sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Gain en capital déclenché
+                  Gain en capital declenche
                 </Typography>
-                <Typography variant="h6">
-                  {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(simulationResult.capitalGainTriggered)}
-                </Typography>
+                <Typography variant="h6">{formatMoney(simulationResult.capitalGainTriggered)}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={12} md={4}>
               <Paper variant="outlined" sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Impôt immédiat
+                  Impot immediat
                 </Typography>
-                <Typography variant="h6">
-                  {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(simulationResult.capitalGainTax)}
-                </Typography>
+                <Typography variant="h6">{formatMoney(simulationResult.capitalGainTax)}</Typography>
               </Paper>
             </Grid>
           </Grid>
 
           <Divider />
 
-          <Typography variant="subtitle1">Flux de dividendes projetés</Typography>
+          <Typography variant="subtitle1">Flux de dividendes projetes</Typography>
           {simulationResult.dividendStream.length === 0 ? (
-            <Alert severity="info">Aucun dividende privilégié projeté pour ce scénario.</Alert>
+            <Alert severity="info">Aucun dividende privilegie projete pour ce scenario.</Alert>
           ) : (
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Année</TableCell>
-                  <TableCell align="right">Dividende</TableCell>
+                  <TableCell>Annee</TableCell>
+                  <TableCell align="right">Flux brut</TableCell>
                   <TableCell align="right">Montant imposable</TableCell>
-                  <TableCell align="right">Après impôt conservé</TableCell>
+                  <TableCell align="right">Retenu apres impots</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {simulationResult.dividendStream.map((entry) => (
                   <TableRow key={entry.year}>
                     <TableCell>{entry.year}</TableCell>
-                    <TableCell align="right">
-                      {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(entry.amount)}
-                    </TableCell>
-                    <TableCell align="right">
-                      {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(entry.taxableAmount)}
-                    </TableCell>
-                    <TableCell align="right">
-                      {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(entry.afterTaxRetained)}
-                    </TableCell>
+                    <TableCell align="right">{formatMoney(entry.amount)}</TableCell>
+                    <TableCell align="right">{formatMoney(entry.taxableAmount)}</TableCell>
+                    <TableCell align="right">{formatMoney(entry.afterTaxRetained)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
 
-          <Typography variant="subtitle1">Rachat des actions privilégiées</Typography>
+          <Typography variant="subtitle1">Calendrier de rachat</Typography>
           {simulationResult.redemptionSchedule.length === 0 ? (
-            <Alert severity="info">Aucun calendrier de rachat n’a été calculé.</Alert>
+            <Alert severity="info">Aucun rachat privilegie planifie.</Alert>
           ) : (
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Année</TableCell>
+                  <TableCell>Annee</TableCell>
                   <TableCell align="right">Solde</TableCell>
-                  <TableCell align="right">Racheté</TableCell>
+                  <TableCell align="right">Rachete</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {simulationResult.redemptionSchedule.map((entry) => (
                   <TableRow key={entry.year}>
                     <TableCell>{entry.year}</TableCell>
-                    <TableCell align="right">
-                      {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(entry.outstanding)}
-                    </TableCell>
-                    <TableCell align="right">
-                      {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(entry.redeemed)}
-                    </TableCell>
+                    <TableCell align="right">{formatMoney(entry.outstanding)}</TableCell>
+                    <TableCell align="right">{formatMoney(entry.redeemed)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
 
-          <Typography variant="subtitle1">Allocation à la fiducie familiale</Typography>
+          <Typography variant="subtitle1">Allocation a la fiducie familiale</Typography>
           {simulationResult.familyTrustAllocation.length === 0 ? (
-            <Alert severity="info">Aucune répartition dans la fiducie pour ce scénario.</Alert>
+            <Alert severity="info">Aucune repartition dans la fiducie pour ce scenario.</Alert>
           ) : (
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Bénéficiaire</TableCell>
-                  <TableCell align="right">Valeur cumulée</TableCell>
+                  <TableCell>Beneficiaire</TableCell>
+                  <TableCell align="right">Valeur cumulee</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {simulationResult.familyTrustAllocation.map((entry) => (
-                  <TableRow key={entry.beneficiaryId}>
+                {simulationResult.familyTrustAllocation.map((entry, index) => (
+                  <TableRow key={entry.beneficiaryId ?? `${entry.beneficiaryName}-${index}`}>
                     <TableCell>{entry.beneficiaryName}</TableCell>
-                    <TableCell align="right">
-                      {new Intl.NumberFormat('fr-CA', { style: 'currency', currency: 'CAD' }).format(entry.cumulativeValue)}
-                    </TableCell>
+                    <TableCell align="right">{formatMoney(entry.cumulativeValue)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -521,10 +653,10 @@ export default function FreezeSimulationScreen() {
 
           {simulationResult.notes.length > 0 && (
             <Stack spacing={1}>
-              <Typography variant="subtitle1">Observations</Typography>
+              <Typography variant="subtitle1">Annotations</Typography>
               {simulationResult.notes.map((note, index) => (
-                <Alert key={index} severity="warning" icon={false}>
-                  {note}
+                <Alert key={`${note.label}-${index}`} severity="info" icon={false}>
+                  <strong>{note.label}</strong>: {note.value}
                 </Alert>
               ))}
             </Stack>
@@ -533,17 +665,12 @@ export default function FreezeSimulationScreen() {
       )}
 
       <Dialog open={scenarioDialogOpen} onClose={handleCloseScenarioDialog} fullWidth maxWidth="sm">
-        <DialogTitle>Nouveau scénario de gel</DialogTitle>
+        <DialogTitle>Nouveau scenario de gel</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
           {scenarioError && <Alert severity="error">{scenarioError}</Alert>}
+          <TextField label="Nom du scenario" value={scenarioForm.label} onChange={handleScenarioFieldChange('label')} required />
           <TextField
-            label="Nom du scénario"
-            value={scenarioForm.label}
-            onChange={handleScenarioFieldChange('label')}
-            required
-          />
-          <TextField
-            label="Année de base"
+            label="Annee de base"
             type="number"
             value={scenarioForm.baseYear}
             onChange={handleScenarioFieldChange('baseYear')}
@@ -559,7 +686,7 @@ export default function FreezeSimulationScreen() {
             required
           />
           <TextField
-            label="Commande de dividende privilégié %"
+            label="Dividende privilegie %"
             type="number"
             value={scenarioForm.preferredDividendRatePercent}
             onChange={handleScenarioFieldChange('preferredDividendRatePercent')}
@@ -567,7 +694,7 @@ export default function FreezeSimulationScreen() {
             required
           />
           <TextField
-            label="Horizon de rachat (années)"
+            label="Horizon de rachat (annees)"
             type="number"
             value={scenarioForm.redemptionYears}
             onChange={handleScenarioFieldChange('redemptionYears')}
@@ -580,13 +707,13 @@ export default function FreezeSimulationScreen() {
             minRows={3}
             value={scenarioForm.notes ?? ''}
             onChange={handleScenarioFieldChange('notes')}
-            placeholder="Hypothèses utilisées, fiducies impliquées, etc."
+            placeholder="Hypotheses utilisees, fiducies impliquees, etc."
           />
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseScenarioDialog}>Annuler</Button>
           <Button variant="contained" onClick={handleScenarioSubmit} disabled={createScenario.isPending}>
-            {createScenario.isPending ? 'Enregistrement…' : 'Enregistrer'}
+            {createScenario.isPending ? 'Enregistrement...' : 'Enregistrer'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { apiClient } from './client';
 
@@ -41,11 +41,14 @@ export interface FreezeSimulationInputs {
 }
 
 export interface FreezeSimulationResult {
+  simulationId: number;
   scenarioId: number;
   targetFreezeYear: number;
   preferredShareValue: number;
   capitalGainTriggered: number;
   capitalGainTax: number;
+  totalDividends: number;
+  totalAfterTaxRetained: number;
   dividendStream: Array<{
     year: number;
     amount: number;
@@ -58,11 +61,66 @@ export interface FreezeSimulationResult {
     redeemed: number;
   }>;
   familyTrustAllocation: Array<{
-    beneficiaryId: number;
+    beneficiaryId: number | null;
     beneficiaryName: string;
     cumulativeValue: number;
   }>;
-  notes: string[];
+  notes: Array<{ label: string; value: string }>;
+}
+
+export type SuccessionStepStatus = 'todo' | 'in_progress' | 'done';
+
+export interface SuccessionProgressStep {
+  id: string;
+  label: string;
+  status: SuccessionStepStatus;
+  summary?: string;
+  blockers?: string[];
+  completedAt?: string | null;
+}
+
+export interface SuccessionProgressReport {
+  generatedAt: string;
+  completionRatio: number;
+  steps: SuccessionProgressStep[];
+  stats: {
+    shareholders: number;
+    trusts: number;
+    assets: number;
+    scenarios: number;
+    simulations: number;
+  };
+  latestSimulation?: {
+    id: number;
+    scenarioId: number;
+    generatedAt: string;
+    inputs: {
+      targetFreezeYear: number;
+      generations: number;
+      reinvestmentRatePercent: number;
+      marginalTaxRatePercent: number;
+      dividendRetentionPercent: number;
+    };
+    metrics?: {
+      preferredShareValue: number;
+      capitalGainTriggered: number;
+      capitalGainTax: number;
+      totalDividends: number;
+      totalAfterTaxRetained: number;
+      latentTaxBefore: number;
+      latentTaxAfter: number;
+    };
+    counts?: {
+      redemptions: number;
+      dividends: number;
+      beneficiaries: number;
+    };
+  };
+  nextAction: {
+    stepId: string | null;
+    label: string;
+    suggestion: string;
+  };
 }
 
 export interface FreezeScenarioPayload {
@@ -104,6 +162,29 @@ export function useFreezeScenarios() {
   });
 }
 
+function formatSimulationNotes(notes: Record<string, unknown> | null | undefined): Array<{ label: string; value: string }> {
+  if (!notes || typeof notes !== 'object') {
+    return [];
+  }
+
+  return Object.entries(notes).map(([key, rawValue]) => {
+    let value = '';
+    if (typeof rawValue === 'number') {
+      value = new Intl.NumberFormat('fr-CA', {
+        maximumFractionDigits: 2
+      }).format(rawValue);
+    } else if (typeof rawValue === 'string') {
+      value = rawValue;
+    } else {
+      value = JSON.stringify(rawValue);
+    }
+    return {
+      label: key,
+      value
+    };
+  });
+}
+
 export function useCreateFreezeScenario() {
   return useMutation({
     mutationFn: async (payload: FreezeScenarioPayload) => {
@@ -122,10 +203,69 @@ export function useDeleteFreezeScenario() {
 }
 
 export function useRunFreezeSimulation() {
+  const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: async (payload: FreezeSimulationInputs) => {
-      const { data } = await apiClient.post<FreezeSimulationResult>('/freeze/simulations', payload);
-      return data;
+    mutationFn: async (payload: FreezeSimulationInputs): Promise<FreezeSimulationResult> => {
+      type BackendSimulation = {
+        id: number;
+        scenarioId: number;
+        targetFreezeYear: number;
+        result: {
+          preferredShareValue: number;
+          capitalGainTriggered: number;
+          capitalGainTax: number;
+          totalDividends: number;
+          totalAfterTaxRetained: number;
+          latentTaxBefore: number;
+          latentTaxAfter: number;
+          notes: Record<string, unknown> | null;
+        } | null;
+        beneficiaryResults: Array<{
+          beneficiaryId: number | null;
+          beneficiaryName: string;
+          cumulativeValue: number;
+        }>;
+        redemptions: Array<{ year: number; outstanding: number; redeemed: number }>;
+        dividends: Array<{ year: number; amount: number; taxableAmount: number; afterTaxRetained: number }>;
+      };
+
+      const { data } = await apiClient.post<BackendSimulation>('/freeze/simulations', payload);
+
+      if (!data.result) {
+        throw new Error('Simulation incomplète');
+      }
+
+      return {
+        simulationId: data.id,
+        scenarioId: data.scenarioId,
+        targetFreezeYear: data.targetFreezeYear,
+        preferredShareValue: data.result.preferredShareValue,
+        capitalGainTriggered: data.result.capitalGainTriggered,
+        capitalGainTax: data.result.capitalGainTax,
+        totalDividends: data.result.totalDividends,
+        totalAfterTaxRetained: data.result.totalAfterTaxRetained,
+        dividendStream: data.dividends,
+        redemptionSchedule: data.redemptions,
+        familyTrustAllocation: data.beneficiaryResults,
+        notes: formatSimulationNotes(data.result.notes)
+      };
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['freeze', 'progress'] });
+      void queryClient.invalidateQueries({ queryKey: ['freeze', 'simulations'] });
     }
+  });
+}
+
+export function useSuccessionProgress() {
+  return useQuery<SuccessionProgressReport>({
+    queryKey: ['freeze', 'progress'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<SuccessionProgressReport>('/freeze/progress');
+      return data;
+    },
+    refetchInterval: 60_000,
+    staleTime: 30_000
   });
 }

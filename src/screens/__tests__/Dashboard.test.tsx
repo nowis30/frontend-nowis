@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import DashboardScreen from '../Dashboard';
 
@@ -19,12 +20,16 @@ vi.mock('../../api/client', () => {
 });
 
 vi.mock('recharts', () => {
-  const Stub = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  const ContainerStub = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  const ChartStub = () => <div />;
   const NullComponent = () => null;
   return {
-    ResponsiveContainer: Stub,
-    BarChart: Stub,
+    ResponsiveContainer: ContainerStub,
+    BarChart: ChartStub,
     Bar: NullComponent,
+    AreaChart: ChartStub,
+    Area: NullComponent,
+    CartesianGrid: NullComponent,
     XAxis: NullComponent,
     YAxis: NullComponent,
     Tooltip: NullComponent,
@@ -108,6 +113,43 @@ vi.mock('../../api/summary', () => ({
   })
 }));
 
+vi.mock('../../api/profileDashboard', () => ({
+  useProfileDashboard: () => ({
+    data: {
+      generatedAt: '2025-01-01T00:00:00Z',
+      summary: {
+        totals: {
+          personalAssets: 1_200_000,
+          investmentHoldings: 850_000,
+          personalLiabilities: 420_000,
+          netWorth: 1_630_000,
+          annualExpenses: 215_000,
+          monthlyExpenses: 18_500
+        },
+        breakdowns: null,
+        goals: null
+      },
+      insights: null,
+      wealth: { overview: null, history: null },
+      projection: {
+        timeline: [
+          { month: '2025-01', projectedNetWorth: 1_000_000, projectedChange: 25_000 },
+          { month: '2025-02', projectedNetWorth: 1_025_000, projectedChange: 25_000 }
+        ],
+        assumptions: {
+          baselineNetWorth: 975_000,
+          averageMonthlyChange: 25_000,
+          averageMonthlyGrowthRate: 0.025,
+          monthlyExpenses: 18_500
+        },
+        notes: ['Projection basée sur le gel successoral en cours.']
+      }
+    },
+    isLoading: false,
+    isError: false
+  })
+}));
+
 vi.mock('../../utils/download', () => {
   return {
     downloadBlob: mockDownload
@@ -115,6 +157,16 @@ vi.mock('../../utils/download', () => {
 });
 
 describe('DashboardScreen exports', () => {
+  const createClient = () =>
+    new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0
+        }
+      }
+    });
+
   beforeEach(() => {
     mockGet.mockReset();
     mockDownload.mockReset();
@@ -124,15 +176,20 @@ describe('DashboardScreen exports', () => {
     vi.restoreAllMocks();
   });
 
+  function renderWithProviders(ui: ReactNode) {
+    const queryClient = createClient();
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter future={routerFutureConfig}>{ui}</MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
   it('telecharge le CSV du bilan', async () => {
     const csvBlob = new Blob(['Immeuble,Unités'], { type: 'text/csv' });
     mockGet.mockResolvedValueOnce({ data: csvBlob });
 
-    render(
-      <MemoryRouter future={routerFutureConfig}>
-        <DashboardScreen />
-      </MemoryRouter>
-    );
+    renderWithProviders(<DashboardScreen />);
 
   const [csvButton] = screen.getAllByRole('button', { name: /Exporter CSV/i });
     fireEvent.click(csvButton);
@@ -154,11 +211,7 @@ describe('DashboardScreen exports', () => {
     const pdfBlob = new Blob(['%PDF-1.7'], { type: 'application/pdf' });
     mockGet.mockResolvedValueOnce({ data: pdfBlob });
 
-    render(
-      <MemoryRouter future={routerFutureConfig}>
-        <DashboardScreen />
-      </MemoryRouter>
-    );
+    renderWithProviders(<DashboardScreen />);
 
   const [pdfButton] = screen.getAllByRole('button', { name: /Exporter PDF/i });
     fireEvent.click(pdfButton);

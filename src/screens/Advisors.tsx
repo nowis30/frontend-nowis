@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -20,6 +20,8 @@ import {
   ListItemText,
   MenuItem,
   Paper,
+  LinearProgress,
+  Skeleton,
   Stack,
   TextField,
   Tooltip,
@@ -46,6 +48,19 @@ import {
   evaluateAdvisors,
   fetchAdvisorQuestions
 } from '../api/advisors';
+import { useSuccessionProgress } from '../api/freeze';
+
+const visuallyHidden = {
+  border: 0,
+  clip: 'rect(0 0 0 0)',
+  height: 1,
+  margin: -1,
+  overflow: 'hidden',
+  padding: 0,
+  position: 'absolute' as const,
+  whiteSpace: 'nowrap' as const,
+  width: 1
+};
 
 interface ConversationEntry {
   id: string;
@@ -182,6 +197,12 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [interviewInput, setInterviewInput] = useState('');
   const [interviewNextQuestion, setInterviewNextQuestion] = useState<AdvisorConvoNextQuestion | null>(null);
+  const successionProgressQuery = useSuccessionProgress();
+  const successionSectionLabelId = useId();
+  const successionSectionDescriptionId = useId();
+  const successionNextActionId = useId();
+  const conversationRegionLabel = useId();
+  const [successionHintInjected, setSuccessionHintInjected] = useState(false);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const interviewAnsweredRef = useRef<Set<string>>(new Set());
   const [gptHealth, setGptHealth] = useState<{ ok: boolean; provider: 'openai' | 'azure' | 'unknown'; message?: string } | null>(null);
@@ -283,6 +304,22 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     : null;
   const uncertainty = result?.uncertainty ?? [];
 
+  const successionProgressReport = successionProgressQuery.data ?? null;
+  const successionCompletionPercent = successionProgressReport
+    ? Math.round(successionProgressReport.completionRatio * 100)
+    : null;
+  const successionBlockers = useMemo(
+    () =>
+      successionProgressReport
+        ? successionProgressReport.steps
+            .filter((step) => Array.isArray(step.blockers) && step.blockers.length > 0)
+            .flatMap((step) => (step.blockers ?? []).map((blocker) => ({ stepLabel: step.label, blocker })))
+            .slice(0, 3)
+        : [],
+    [successionProgressReport]
+  );
+  const successionLatestSimulation = successionProgressReport?.latestSimulation ?? null;
+
   useEffect(() => {
     async function bootstrap() {
       try {
@@ -331,6 +368,43 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     setInputValue('');
     setFormError(null);
   }, [currentQuestion?.id]);
+
+  useEffect(() => {
+    if (successionHintInjected || !successionProgressReport) {
+      return;
+    }
+
+    const blockers = successionProgressReport.steps
+      .filter((step) => Array.isArray(step.blockers) && step.blockers.length > 0)
+      .flatMap((step) => step.blockers ?? [])
+      .slice(0, 3);
+
+    const messageParts = [
+      `Suivi succession : ${Math.round(successionProgressReport.completionRatio * 100)} % complété.`,
+      `Prochaine étape : ${successionProgressReport.nextAction.label}. ${successionProgressReport.nextAction.suggestion}`
+    ];
+
+    if (blockers.length) {
+      messageParts.push(`Bloqueurs à lever : ${blockers.join(' • ')}.`);
+    }
+
+    if (successionProgressReport.latestSimulation) {
+      const { generatedAt, inputs } = successionProgressReport.latestSimulation;
+      messageParts.push(
+        `Dernière simulation : ${new Date(generatedAt).toLocaleDateString('fr-CA')} (horizon ${inputs.targetFreezeYear}).`
+      );
+    }
+
+    setConversation((prev) => [
+      ...prev,
+      {
+        id: generateId('succession-progress'),
+        role: 'system',
+        content: messageParts.join(' ')
+      }
+    ]);
+    setSuccessionHintInjected(true);
+  }, [successionHintInjected, successionProgressReport]);
 
   useEffect(() => {
     if (!interviewOpen) {
@@ -796,6 +870,82 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
 
       {error && <Alert severity="error">{error}</Alert>}
 
+      <Paper
+        component="section"
+        variant="outlined"
+        aria-labelledby={successionSectionLabelId}
+        aria-describedby={successionSectionDescriptionId}
+        sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}
+      >
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
+          <Stack spacing={0.5}>
+            <Typography variant="h6" id={successionSectionLabelId}>
+              Suivi succession
+            </Typography>
+            <Typography variant="body2" color="text.secondary" id={successionSectionDescriptionId}>
+              Synthèse des étapes gel successoral pour orienter la prochaine réponse.
+            </Typography>
+          </Stack>
+          {successionCompletionPercent !== null && (
+            <Chip
+              label={`${successionCompletionPercent} % complété`}
+              color={successionCompletionPercent >= 100 ? 'success' : 'primary'}
+            />
+          )}
+        </Stack>
+
+        {successionProgressQuery.isLoading ? (
+          <Skeleton variant="rectangular" height={8} sx={{ borderRadius: 999 }} />
+        ) : successionProgressQuery.isError ? (
+          <Alert severity="warning">Impossible de récupérer la progression succession pour le moment.</Alert>
+        ) : successionProgressReport ? (
+          <Stack spacing={2}>
+            <LinearProgress
+              variant="determinate"
+              value={Math.min(successionProgressReport.completionRatio * 100, 100)}
+              sx={{ height: 8, borderRadius: 999 }}
+              aria-labelledby={successionSectionLabelId}
+              aria-describedby={successionNextActionId}
+            />
+            <Typography variant="body2" id={successionNextActionId}>
+              <strong>{successionProgressReport.nextAction.label}</strong> · {successionProgressReport.nextAction.suggestion}
+            </Typography>
+            {successionBlockers.length > 0 && (
+              <Stack spacing={0.5}>
+                <Typography variant="subtitle2" color="warning.main">
+                  Bloqueurs prioritaires
+                </Typography>
+                <List dense disablePadding>
+                  {successionBlockers.map((entry, index) => (
+                    <ListItem key={`succession-blocker-${index}`} disableGutters sx={{ alignItems: 'flex-start', py: 0.25 }}>
+                      <ListItemIcon sx={{ minWidth: 32, mt: 0.5 }}>
+                        <TaskAltIcon color="warning" fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={entry.blocker}
+                        secondary={entry.stepLabel}
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Stack>
+            )}
+            {successionLatestSimulation && (
+              <Typography variant="caption" color="text.secondary">
+                Dernière simulation générée le {new Date(successionLatestSimulation.generatedAt).toLocaleDateString('fr-CA')} · Horizon{' '}
+                {successionLatestSimulation.inputs.targetFreezeYear}
+              </Typography>
+            )}
+          </Stack>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            Aucune donnée de progression disponible.
+          </Typography>
+        )}
+      </Paper>
+
       {(uncertainty.length > 0 || speechError) && (
         <Alert severity="warning" variant="outlined">
           <Stack spacing={1}>
@@ -817,10 +967,22 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       )}
 
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} alignItems="stretch">
-        <Paper elevation={3} sx={{ flex: 1, p: 3, maxHeight: 480, overflowY: 'auto' }}>
-          <Stack spacing={2}>
+        <Paper
+          component="section"
+          role="log"
+          aria-live="polite"
+          aria-labelledby={conversationRegionLabel}
+          tabIndex={0}
+          elevation={3}
+          sx={{ flex: 1, p: 3, maxHeight: 480, overflowY: 'auto' }}
+        >
+          <Typography id={conversationRegionLabel} component="h2" sx={visuallyHidden}>
+            Historique de la conversation avec les experts IA
+          </Typography>
+          <Stack component="ul" spacing={2} sx={{ listStyle: 'none', p: 0, m: 0 }}>
             {conversation.map((entry) => (
               <Box
+                component="li"
                 key={entry.id}
                 sx={{
                   alignSelf: entry.role === 'user' ? 'flex-end' : 'flex-start',
@@ -829,14 +991,15 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
                   px: 2,
                   py: 1.5,
                   borderRadius: 2,
-                  maxWidth: '85%'
+                  maxWidth: '85%',
+                  listStyle: 'none'
                 }}
               >
                 <Typography variant="body2">{entry.content}</Typography>
               </Box>
             ))}
             {!conversation.length && (
-              <Typography color="text.secondary">
+              <Typography component="li" color="text.secondary" sx={{ listStyle: 'none' }}>
                 Les experts se préparent à poser leurs questions. Répondez pour recevoir vos premières recommandations.
               </Typography>
             )}

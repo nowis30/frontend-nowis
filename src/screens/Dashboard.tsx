@@ -26,6 +26,7 @@ import { useAuthStore } from '../store/authStore';
 import { apiClient } from '../api/client';
 import { useSummary } from '../api/summary';
 import { downloadBlob } from '../utils/download';
+import ProfileProjectionCard from '../components/ProfileProjectionCard';
 
 function DashboardScreen() {
   const { data, isLoading } = useSummary();
@@ -331,6 +332,10 @@ function DashboardScreen() {
               </Typography>
             )}
           </Paper>
+        </Grid>
+
+        <Grid item xs={12}>
+          <ProfileProjectionCard />
         </Grid>
       </Grid>
     </Stack>
