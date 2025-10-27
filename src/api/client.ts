@@ -8,9 +8,21 @@ import { getAdvisorPortalKey } from '../utils/advisorPortalKey';
 const envBaseUrl =
   (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.URL_API_VITE || '';
 
-const isDev = Boolean((import.meta as any).env?.DEV);
-const fallbackBaseUrl = isDev ? '' : 'https://backend-nowis-1.onrender.com';
-const resolvedBaseUrl = (envBaseUrl || fallbackBaseUrl).replace(/\/$/, '');
+// On Vercel on s'appuie sur le rewrite /api -> backend Render, sinon on retombe sur Render.
+const resolvedBaseUrl = (() => {
+  if (envBaseUrl) {
+    return envBaseUrl.replace(/\/$/, '');
+  }
+
+  if (typeof window !== 'undefined') {
+    const { hostname } = window.location;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.vercel.app')) {
+      return '';
+    }
+  }
+
+  return 'https://backend-nowis-1.onrender.com';
+})();
 
 export const apiClient = axios.create({
   baseURL: resolvedBaseUrl ? `${resolvedBaseUrl}/api` : '/api'
