@@ -573,13 +573,25 @@ function PersonalIncomeScreen() {
                 const file = e.target.files?.[0];
                 if (!file || !selectedShareholderId) return;
                 try {
-                  const { taxYear } = await importTax.mutateAsync({
+                  const { taxYear, createdIds, extracted } = await importTax.mutateAsync({
                     file,
                     shareholderId: selectedShareholderId,
                     taxYear: selectedTaxYear,
                     autoCreate: true
                   });
-                  notify(`Rapport d'impôt importé (${taxYear}). Revenus ajoutés.`, 'success');
+                  // Aligne l'année affichée avec l'année extraite/cible
+                  if (Number.isFinite(taxYear)) {
+                    setSelectedTaxYear(taxYear);
+                  }
+                  const createdCount = Array.isArray(createdIds) ? createdIds.length : 0;
+                  const extractedCount = Array.isArray(extracted) ? extracted.length : 0;
+                  if (createdCount > 0) {
+                    notify(`Import terminé (${taxYear}). ${createdCount} revenu(x) ajouté(s).`, 'success');
+                  } else if (extractedCount > 0 && createdCount === 0) {
+                    notify(`Import analysé (${taxYear}) mais aucun revenu n'a été créé automatiquement. Vérifie les montants extraits.`, 'warning');
+                  } else {
+                    notify("Aucun revenu identifiable dans le document. Vérifie le PDF ou essaie un autre feuillet.", 'warning');
+                  }
                 } catch (err: any) {
                   // Afficher des messages plus précis côté UI
                   const status = err?.response?.status as number | undefined;
