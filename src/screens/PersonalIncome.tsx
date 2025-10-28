@@ -149,7 +149,8 @@ function PersonalIncomeScreen() {
   const { data: profile } = usePersonalProfile();
   const updateProfile = useUpdatePersonalProfile();
   // Documents importés (personnel)
-  const { data: documents } = useDocuments({ domain: 'personal-income', taxYear: selectedTaxYear });
+  const [showAllDocs, setShowAllDocs] = useState(false);
+  const { data: documents } = useDocuments({ domain: 'personal-income', taxYear: showAllDocs ? undefined as any : selectedTaxYear });
   const updateDocument = useUpdateDocument();
   const deleteDocument = useDeleteDocument();
   const [renameDocId, setRenameDocId] = useState<number | null>(null);
@@ -446,9 +447,21 @@ function PersonalIncomeScreen() {
       </Paper>
 
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Documents importés
-        </Typography>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+          <Typography variant="h6">Documents importés</Typography>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Typography variant="body2">Tous</Typography>
+            <TextField select size="small" label="Filtre année" value={showAllDocs ? '' : String(selectedTaxYear)} onChange={(e: ChangeEvent<HTMLInputElement>) => {
+              const v = e.target.value;
+              if (!v) { setShowAllDocs(true); } else { setShowAllDocs(false); setSelectedTaxYear(Number(v)); }
+            }} sx={{ minWidth: 140 }}>
+              <MenuItem value="">Toutes</MenuItem>
+              <MenuItem value={String(selectedTaxYear)}>{selectedTaxYear}</MenuItem>
+              <MenuItem value={String(selectedTaxYear - 1)}>{selectedTaxYear - 1}</MenuItem>
+              <MenuItem value={String(selectedTaxYear - 2)}>{selectedTaxYear - 2}</MenuItem>
+            </TextField>
+          </Stack>
+        </Stack>
         {(!documents || documents.length === 0) ? (
           <Typography variant="body2" color="text.secondary">Aucun document pour {selectedTaxYear}.</Typography>
         ) : (
