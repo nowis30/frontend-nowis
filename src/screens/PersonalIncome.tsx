@@ -37,6 +37,7 @@ import {
   useImportPersonalTaxReturn,
   usePersonalProfile,
   useUpdatePersonalProfile,
+  usePersonalTaxReturn,
   type PersonalIncomeDto,
   type PersonalIncomeCategory,
   type PersonalIncomePayload
@@ -138,6 +139,10 @@ function PersonalIncomeScreen() {
     selectedTaxYear
   );
   const { data: summary, isLoading: isLoadingSummary } = usePersonalIncomeSummary(
+    selectedShareholderId,
+    selectedTaxYear
+  );
+  const { data: fullReturn, isLoading: isLoadingReturn } = usePersonalTaxReturn(
     selectedShareholderId,
     selectedTaxYear
   );
@@ -785,6 +790,54 @@ function PersonalIncomeScreen() {
           </Paper>
         </Grid>
       </Grid>
+
+      <Paper sx={{ p: 3, mt: 4 }}>
+        <Stack spacing={2}>
+          <Box>
+            <Typography variant="h6">Feuillets détectés (extraction IA)</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Visualise les feuillets (T4/T5/RL‑1/T3/T5008…) et leurs lignes/cases extraits du PDF importé.
+            </Typography>
+          </Box>
+          {isLoadingReturn ? (
+            <Typography>Chargement des feuillets…</Typography>
+          ) : !fullReturn || !fullReturn.slips || fullReturn.slips.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">Aucun feuillet détecté pour {selectedTaxYear}.</Typography>
+          ) : (
+            <Stack spacing={2}>
+              {fullReturn.slips.map((s) => (
+                <Paper key={s.id} variant="outlined" sx={{ p: 2 }}>
+                  <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} spacing={1}>
+                    <Typography variant="subtitle1">{s.slipType}</Typography>
+                    <Stack direction="row" spacing={2}>
+                      <Typography variant="body2" color="text.secondary">Émetteur: {s.issuer || '—'}</Typography>
+                      <Typography variant="body2" color="text.secondary">Compte: {s.accountNumber || '—'}</Typography>
+                    </Stack>
+                  </Stack>
+                  <Table size="small" sx={{ mt: 1 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Code</TableCell>
+                        <TableCell>Libellé</TableCell>
+                        <TableCell align="right">Montant</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {s.lines.map((li) => (
+                        <TableRow key={li.id}>
+                          <TableCell>{li.code || '—'}</TableCell>
+                          <TableCell>{li.label}</TableCell>
+                          <TableCell align="right">{currencyFormatter.format(li.amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Paper>
+              ))}
+            </Stack>
+          )}
+        </Stack>
+      </Paper>
 
       <Paper sx={{ p: 3, mt: 4 }}>
         <Stack spacing={2}>

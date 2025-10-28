@@ -75,6 +75,76 @@ export interface UpdatePersonalProfilePayload {
   gender?: 'MALE' | 'FEMALE' | 'OTHER';
 }
 
+// --- Tax return (full structure with lines and slips) ---
+export type TaxSection = 'INCOME' | 'DEDUCTION' | 'CREDIT' | 'CARRYFORWARD' | 'PAYMENT' | 'OTHER';
+
+export interface PersonalTaxReturnDto {
+  id: number;
+  shareholderId: number;
+  taxYear: number;
+  taxableIncome: number;
+  federalTax: number;
+  provincialTax: number;
+  balanceDue: number;
+  documentId: number | null;
+  rawExtraction?: unknown | null;
+}
+
+export interface PersonalTaxReturnLineDto {
+  id: number;
+  section: TaxSection;
+  code: string | null;
+  label: string;
+  amount: number;
+  orderIndex: number;
+  metadata?: unknown | null;
+}
+
+export interface TaxSlipLineDto {
+  id: number;
+  code: string | null;
+  label: string;
+  amount: number;
+  orderIndex: number;
+  metadata?: unknown | null;
+}
+
+export interface TaxSlipDto {
+  id: number;
+  slipType: string;
+  issuer: string | null;
+  accountNumber: string | null;
+  documentId: number | null;
+  metadata?: unknown | null;
+  lines: TaxSlipLineDto[];
+}
+
+export interface PersonalTaxReturnResponse {
+  return: PersonalTaxReturnDto | null;
+  lines: PersonalTaxReturnLineDto[];
+  slips: TaxSlipDto[];
+}
+
+export function usePersonalTaxReturn(shareholderId?: number | null, taxYear?: number | null) {
+  return useQuery<PersonalTaxReturnResponse>({
+    queryKey: ['personal-tax-return', shareholderId ?? 'all', taxYear ?? 'all'],
+    enabled: Boolean(shareholderId && taxYear),
+    queryFn: async () => {
+      if (!shareholderId || !taxYear) {
+        return { return: null, lines: [], slips: [] } as PersonalTaxReturnResponse;
+      }
+      const params = new URLSearchParams({
+        shareholderId: String(shareholderId),
+        taxYear: String(taxYear)
+      });
+      const { data } = await apiClient.get<PersonalTaxReturnResponse>(
+        `/personal-incomes/returns?${params.toString()}`
+      );
+      return data;
+    }
+  });
+}
+
 export function usePersonalIncomeShareholders() {
   return useQuery<PersonalIncomeShareholderDto[]>({
     queryKey: ['personal-income-shareholders'],
