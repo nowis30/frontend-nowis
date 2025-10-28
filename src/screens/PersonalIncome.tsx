@@ -504,8 +504,16 @@ function PersonalIncomeScreen() {
                         } else {
                           notify('Ré-ingestion terminée: aucun revenu détecté.', 'info');
                         }
-                      } catch (err) {
-                        notify("Ré-ingestion impossible pour ce document.", 'error');
+                      } catch (err: any) {
+                        const status = err?.response?.status as number | undefined;
+                        const serverMsg = (err?.response?.data?.error as string | undefined) || '';
+                        if (status === 410) {
+                          notify("Ce document n'est plus disponible côté serveur (stockage éphémère). Ré-uploade le fichier puis ré-essaie.", 'warning');
+                        } else if (serverMsg) {
+                          notify(serverMsg, 'error');
+                        } else {
+                          notify('Ré-ingestion impossible pour ce document.', 'error');
+                        }
                       }
                     }}>
                       <ReplayIcon />
