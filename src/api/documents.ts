@@ -59,3 +59,29 @@ export function useDeleteDocument() {
 export function buildDocumentDownloadUrl(id: number): string {
   return `/api/documents/${id}/download`;
 }
+
+export interface ReingestResult {
+  shareholderId?: number | null;
+  taxYear?: number;
+  extracted?: any[];
+  createdIds?: number[];
+  rentalStatements?: number[];
+  documentId: number;
+}
+
+export async function reingestDocument(params: {
+  documentId: number;
+  domain: 'personal-income' | 'property' | 'company';
+  autoCreate?: boolean;
+  shareholderId?: number | null;
+  taxYear?: number | null;
+}): Promise<ReingestResult> {
+  const sp = new URLSearchParams();
+  sp.set('domain', params.domain);
+  sp.set('documentId', String(params.documentId));
+  if (typeof params.autoCreate === 'boolean') sp.set('autoCreate', String(params.autoCreate));
+  if (params.shareholderId) sp.set('shareholderId', String(params.shareholderId));
+  if (params.taxYear) sp.set('taxYear', String(params.taxYear));
+  const { data } = await apiClient.post<ReingestResult>(`/ai/reingest?${sp.toString()}`);
+  return data;
+}

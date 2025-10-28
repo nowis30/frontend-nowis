@@ -25,6 +25,7 @@ import {
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LaunchIcon from '@mui/icons-material/Launch';
+import ReplayIcon from '@mui/icons-material/Replay';
 
 import {
   usePersonalIncomeShareholders,
@@ -41,7 +42,7 @@ import {
   type PersonalIncomePayload
 } from '../api/personalIncome';
 import { useComputePersonalTaxReturn } from '../api/tax';
-import { buildDocumentDownloadUrl, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
+import { buildDocumentDownloadUrl, reingestDocument, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
 
 interface PersonalIncomeFormState {
   shareholderId: number | null;
@@ -483,6 +484,31 @@ function PersonalIncomeScreen() {
                   <TableCell align="right">
                     <IconButton aria-label="ouvrir" href={buildDocumentDownloadUrl(d.id)} target="_blank" rel="noopener">
                       <LaunchIcon />
+                    </IconButton>
+                    <IconButton aria-label="ré-ingérer" onClick={async () => {
+                      try {
+                        const result = await reingestDocument({
+                          documentId: d.id,
+                          domain: 'personal-income',
+                          autoCreate: true,
+                          shareholderId: selectedShareholderId,
+                          taxYear: selectedTaxYear
+                        });
+                        if (Number.isFinite(result.taxYear)) setSelectedTaxYear(result.taxYear as number);
+                        const createdCount = result.createdIds?.length ?? 0;
+                        const extractedCount = result.extracted?.length ?? 0;
+                        if (createdCount > 0) {
+                          notify(`Ré-ingestion OK (${result.taxYear}). ${createdCount} revenu(x) ajouté(s).`, 'success');
+                        } else if (extractedCount > 0) {
+                          notify(`Ré-ingestion analysée (${result.taxYear}) mais aucun revenu créé automatiquement.`, 'warning');
+                        } else {
+                          notify('Ré-ingestion terminée: aucun revenu détecté.', 'info');
+                        }
+                      } catch (err) {
+                        notify("Ré-ingestion impossible pour ce document.", 'error');
+                      }
+                    }}>
+                      <ReplayIcon />
                     </IconButton>
                     <IconButton aria-label="renommer" onClick={() => openRename(d.id, d.label)}>
                       <EditIcon />
