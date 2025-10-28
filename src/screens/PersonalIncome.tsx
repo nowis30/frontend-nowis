@@ -382,8 +382,21 @@ function PersonalIncomeScreen() {
                     autoCreate: true
                   });
                   notify(`Rapport d'impôt importé (${taxYear}). Revenus ajoutés.`, 'success');
-                } catch {
-                  notify("Import impossible. Vérifie le fichier PDF ou image.", 'error');
+                } catch (err: any) {
+                  // Afficher des messages plus précis côté UI
+                  const status = err?.response?.status as number | undefined;
+                  const serverMsg = (err?.response?.data?.error as string | undefined) || '';
+                  if (status === 501) {
+                    notify("Import indisponible pour le moment: le serveur n'est pas configuré pour l'extraction (clé OpenAI manquante).", 'warning');
+                  } else if (status === 413 || /trop volumineux|too large/i.test(serverMsg)) {
+                    notify('Fichier trop volumineux (max 20 Mo).', 'error');
+                  } else if (/non supporté|unsupported/i.test(serverMsg)) {
+                    notify('Type de fichier non supporté. Utilise un PDF ou une image (PNG/JPG/WEBP/HEIC).', 'error');
+                  } else if (status === 400 && serverMsg) {
+                    notify(serverMsg, 'error');
+                  } else {
+                    notify("Import impossible. Vérifie le fichier PDF ou image.", 'error');
+                  }
                 } finally {
                   e.target.value = '';
                 }

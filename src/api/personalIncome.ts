@@ -181,11 +181,12 @@ export function useImportPersonalTaxReturn() {
       const form = new FormData();
       form.append('file', params.file);
       const sp = new URLSearchParams();
+      sp.set('domain', 'personal-income');
       if (params.shareholderId) sp.set('shareholderId', String(params.shareholderId));
       if (params.taxYear) sp.set('taxYear', String(params.taxYear));
       if (typeof params.autoCreate === 'boolean') sp.set('autoCreate', String(params.autoCreate));
       const { data } = await apiClient.post<ImportPersonalTaxResponse>(
-        `/personal-incomes/import?${sp.toString()}`,
+        `/ai/ingest?${sp.toString()}`,
         form,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       );
