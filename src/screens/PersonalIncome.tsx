@@ -24,6 +24,7 @@ import {
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import LaunchIcon from '@mui/icons-material/Launch';
 
 import {
   usePersonalIncomeShareholders,
@@ -33,11 +34,14 @@ import {
   useUpdatePersonalIncome,
   useDeletePersonalIncome,
   useImportPersonalTaxReturn,
+  usePersonalProfile,
+  useUpdatePersonalProfile,
   type PersonalIncomeDto,
   type PersonalIncomeCategory,
   type PersonalIncomePayload
 } from '../api/personalIncome';
 import { useComputePersonalTaxReturn } from '../api/tax';
+import { buildDocumentDownloadUrl, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
 
 interface PersonalIncomeFormState {
   shareholderId: number | null;
@@ -142,6 +146,59 @@ function PersonalIncomeScreen() {
   const updateIncome = useUpdatePersonalIncome(editingIncomeId);
   const importTax = useImportPersonalTaxReturn();
   const computePersonalTax = useComputePersonalTaxReturn();
+  const { data: profile } = usePersonalProfile();
+  const updateProfile = useUpdatePersonalProfile();
+  // Documents importés (personnel)
+  const { data: documents } = useDocuments({ domain: 'personal-income', taxYear: selectedTaxYear });
+  const updateDocument = useUpdateDocument();
+  const deleteDocument = useDeleteDocument();
+  const [renameDocId, setRenameDocId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState<string>('');
+
+  const openRename = (id: number, current: string) => {
+    setRenameDocId(id);
+    setRenameValue(current);
+  };
+  const closeRename = () => {
+    setRenameDocId(null);
+    setRenameValue('');
+  };
+  const confirmRename = () => {
+    if (!renameDocId) return;
+    updateDocument.mutate(
+      { id: renameDocId, label: renameValue },
+      { onSuccess: () => { notify('Document renommé.', 'success'); closeRename(); }, onError: () => notify('Renommage impossible.', 'error') }
+    );
+  };
+
+  const [profileForm, setProfileForm] = useState({
+    displayName: '',
+    gender: '' as '' | 'MALE' | 'FEMALE' | 'OTHER',
+    birthDate: '' as string,
+    address: ''
+  });
+
+  useEffect(() => {
+    if (profile) {
+      setProfileForm({
+        displayName: profile.displayName ?? '',
+        gender: (profile.gender ?? '') as '' | 'MALE' | 'FEMALE' | 'OTHER',
+        birthDate: profile.birthDate ?? '',
+        address: profile.address ?? ''
+      });
+    }
+  }, [profile]);
+
+  const profileAge = useMemo(() => {
+    if (!profileForm.birthDate) return '';
+    const d = new Date(profileForm.birthDate);
+    if (Number.isNaN(d.getTime())) return '';
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
+    return String(Math.max(0, age));
+  }, [profileForm.birthDate]);
 
   const currencyFormatter = useMemo(
     () =>
@@ -303,6 +360,134 @@ function PersonalIncomeScreen() {
 
   return (
     <Box>
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Informations personnelles
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              label="Nom complet"
+              value={profileForm.displayName}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setProfileForm((p) => ({ ...p, displayName: e.target.value }))
+              }
+            />
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <TextField
+              select
+              fullWidth
+              label="Sexe"
+              value={profileForm.gender || ''}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setProfileForm((p) => ({ ...p, gender: (e.target.value as any) || '' }))
+              }
+            >
+              <MenuItem value="">—</MenuItem>
+              <MenuItem value="MALE">Homme</MenuItem>
+              <MenuItem value="FEMALE">Femme</MenuItem>
+              <MenuItem value="OTHER">Autre</MenuItem>
+            </TextField>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <TextField
+              fullWidth
+              label="Date de naissance"
+              type="date"
+              InputLabelProps={{ shrink: true }}
+              value={profileForm.birthDate ? profileForm.birthDate.substring(0, 10) : ''}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                const v = e.target.value;
+                setProfileForm((p) => ({ ...p, birthDate: v ? new Date(v).toISOString() : '' }));
+              }}
+            />
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <TextField fullWidth label="Âge" value={profileAge} InputProps={{ readOnly: true }} />
+          </Grid>
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              label="Adresse"
+              value={profileForm.address}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setProfileForm((p) => ({ ...p, address: e.target.value }))
+              }
+            />
+          </Grid>
+          <Grid item xs={12} md="auto">
+            <Button
+              variant="contained"
+              onClick={() =>
+                updateProfile.mutate({
+                  displayName: profileForm.displayName || undefined,
+                  gender: (profileForm.gender || undefined) as any,
+                  birthDate: profileForm.birthDate || undefined,
+                  address: profileForm.address || null
+                })
+              }
+              disabled={updateProfile.isPending}
+            >
+              Enregistrer le profil
+            </Button>
+          </Grid>
+          {profile?.latestTaxableIncome != null && (
+            <Grid item xs={12} md={4}>
+              <Alert severity="info">
+                Revenu imposable {profile.latestTaxYear}: {currencyFormatter.format(profile.latestTaxableIncome)}
+              </Alert>
+            </Grid>
+          )}
+        </Grid>
+      </Paper>
+
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Documents importés
+        </Typography>
+        {(!documents || documents.length === 0) ? (
+          <Typography variant="body2" color="text.secondary">Aucun document pour {selectedTaxYear}.</Typography>
+        ) : (
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Nom</TableCell>
+                <TableCell>Taille</TableCell>
+                <TableCell>Date</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {documents.map((d) => (
+                <TableRow key={d.id} hover>
+                  <TableCell>{d.label}</TableCell>
+                  <TableCell>{(d.size / 1024).toFixed(1)} Ko</TableCell>
+                  <TableCell>{new Date(d.createdAt).toLocaleString()}</TableCell>
+                  <TableCell align="right">
+                    <IconButton aria-label="ouvrir" href={buildDocumentDownloadUrl(d.id)} target="_blank" rel="noopener">
+                      <LaunchIcon />
+                    </IconButton>
+                    <IconButton aria-label="renommer" onClick={() => openRename(d.id, d.label)}>
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton aria-label="supprimer" onClick={() => {
+                      const ok = window.confirm(`Supprimer le document "${d.label}" ?`);
+                      if (!ok) return;
+                      deleteDocument.mutate(d.id, { onSuccess: () => notify('Document supprimé.', 'success'), onError: () => notify('Suppression impossible.', 'error') });
+                    }}>
+                      <DeleteIcon />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Paper>
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
           <Typography variant="h4">Revenus personnels imposables</Typography>
@@ -766,6 +951,17 @@ function PersonalIncomeScreen() {
           <Button variant="contained" onClick={handleSubmitForm} disabled={isSaving}>
             Enregistrer
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={renameDocId != null} onClose={closeRename} fullWidth>
+        <DialogTitle>Renommer le document</DialogTitle>
+        <DialogContent>
+          <TextField fullWidth label="Nom" value={renameValue} onChange={(e: ChangeEvent<HTMLInputElement>) => setRenameValue(e.target.value)} sx={{ mt: 1 }} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeRename}>Annuler</Button>
+          <Button variant="contained" onClick={confirmRename} disabled={updateDocument.isPending}>Enregistrer</Button>
         </DialogActions>
       </Dialog>
     </Box>

@@ -56,6 +56,25 @@ export interface PersonalIncomeShareholderDto {
   displayName: string;
 }
 
+export interface PersonalProfileDto {
+  id: number;
+  displayName: string;
+  address: string | null;
+  birthDate: string | null; // ISO date
+  gender: 'MALE' | 'FEMALE' | 'OTHER' | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  latestTaxableIncome?: number | null;
+  latestTaxYear?: number | null;
+}
+
+export interface UpdatePersonalProfilePayload {
+  displayName?: string;
+  address?: string | null;
+  birthDate?: string | null; // ISO date string
+  gender?: 'MALE' | 'FEMALE' | 'OTHER';
+}
+
 export function usePersonalIncomeShareholders() {
   return useQuery<PersonalIncomeShareholderDto[]>({
     queryKey: ['personal-income-shareholders'],
@@ -81,6 +100,30 @@ export function usePersonalIncomes(shareholderId?: number | null, taxYear?: numb
       });
       const { data } = await apiClient.get<PersonalIncomeDto[]>(`/personal-incomes?${params.toString()}`);
       return data;
+    }
+  });
+}
+
+export function usePersonalProfile() {
+  return useQuery<PersonalProfileDto>({
+    queryKey: ['personal-profile'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PersonalProfileDto>('/personal-incomes/profile');
+      return data;
+    }
+  });
+}
+
+export function useUpdatePersonalProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: UpdatePersonalProfilePayload) => {
+      const { data } = await apiClient.put<PersonalProfileDto>('/personal-incomes/profile', payload);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['personal-profile'] });
+      queryClient.invalidateQueries({ queryKey: ['personal-income-shareholders'] });
     }
   });
 }
@@ -167,6 +210,7 @@ export interface ImportPersonalTaxResponse {
   taxYear: number;
   extracted: ImportPersonalTaxResultItem[];
   createdIds: number[];
+  documentId?: number;
 }
 
 export function useImportPersonalTaxReturn() {
