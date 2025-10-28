@@ -153,3 +153,46 @@ export function useDeletePersonalIncome() {
     }
   });
 }
+
+export interface ImportPersonalTaxResultItem {
+  category: PersonalIncomeCategory | string;
+  label: string;
+  amount: number;
+  source?: string | null;
+  slipType?: string | null;
+}
+
+export interface ImportPersonalTaxResponse {
+  shareholderId: number;
+  taxYear: number;
+  extracted: ImportPersonalTaxResultItem[];
+  createdIds: number[];
+}
+
+export function useImportPersonalTaxReturn() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      file: File | Blob;
+      shareholderId?: number | null;
+      taxYear?: number | null;
+      autoCreate?: boolean;
+    }): Promise<ImportPersonalTaxResponse> => {
+      const form = new FormData();
+      form.append('file', params.file);
+      const sp = new URLSearchParams();
+      if (params.shareholderId) sp.set('shareholderId', String(params.shareholderId));
+      if (params.taxYear) sp.set('taxYear', String(params.taxYear));
+      if (typeof params.autoCreate === 'boolean') sp.set('autoCreate', String(params.autoCreate));
+      const { data } = await apiClient.post<ImportPersonalTaxResponse>(
+        `/personal-incomes/import?${sp.toString()}`,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+      return data;
+    },
+    onSuccess: () => {
+      invalidatePersonalIncomeQueries(queryClient);
+    }
+  });
+}

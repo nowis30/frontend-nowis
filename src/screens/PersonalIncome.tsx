@@ -32,6 +32,7 @@ import {
   useCreatePersonalIncome,
   useUpdatePersonalIncome,
   useDeletePersonalIncome,
+  useImportPersonalTaxReturn,
   type PersonalIncomeDto,
   type PersonalIncomeCategory,
   type PersonalIncomePayload
@@ -139,6 +140,7 @@ function PersonalIncomeScreen() {
   const createIncome = useCreatePersonalIncome();
   const deleteIncome = useDeletePersonalIncome();
   const updateIncome = useUpdatePersonalIncome(editingIncomeId);
+  const importTax = useImportPersonalTaxReturn();
   const computePersonalTax = useComputePersonalTaxReturn();
 
   const currencyFormatter = useMemo(
@@ -358,6 +360,35 @@ function PersonalIncomeScreen() {
           />
           <Button variant="contained" onClick={handleOpenForm} disabled={!selectedShareholderId}>
             Ajouter un revenu
+          </Button>
+          <Button
+            variant="outlined"
+            component="label"
+            disabled={!selectedShareholderId}
+          >
+            Importer un rapport d'impôt
+            <input
+              hidden
+              type="file"
+              accept="application/pdf,image/*"
+              onChange={async (e: ChangeEvent<HTMLInputElement>) => {
+                const file = e.target.files?.[0];
+                if (!file || !selectedShareholderId) return;
+                try {
+                  const { taxYear } = await importTax.mutateAsync({
+                    file,
+                    shareholderId: selectedShareholderId,
+                    taxYear: selectedTaxYear,
+                    autoCreate: true
+                  });
+                  notify(`Rapport d'impôt importé (${taxYear}). Revenus ajoutés.`, 'success');
+                } catch {
+                  notify("Import impossible. Vérifie le fichier PDF ou image.", 'error');
+                } finally {
+                  e.target.value = '';
+                }
+              }}
+            />
           </Button>
         </Stack>
       </Stack>

@@ -22,6 +22,9 @@ import ValuationScreen from './screens/Valuation';
 import PersonalIncomeScreen from './screens/PersonalIncome';
 import FamilyWealthScreen from './screens/FamilyWealth';
 import FreezeSimulationScreen from './screens/FreezeSimulation';
+import CorporateDividendsScreen from './screens/CorporateDividends';
+import CorporateROCScreen from './screens/CorporateROC';
+import TaxExportsScreen from './screens/TaxExports';
 
 function App() {
   return (
@@ -50,6 +53,9 @@ function App() {
     <Route path="/personal-income" element={<PersonalIncomeScreen />} />
     <Route path="/family-wealth" element={<FamilyWealthScreen />} />
     <Route path="/freeze-simulation" element={<FreezeSimulationScreen />} />
+    <Route path="/corporate/dividends" element={<CorporateDividendsScreen />} />
+    <Route path="/corporate/roc" element={<CorporateROCScreen />} />
+    <Route path="/tax/exports" element={<TaxExportsScreen />} />
         <Route path="/session" element={<SpecialistSession />} />
         <Route path="/invoices" element={<InvoicesScreen />} />
         <Route path="/revenues" element={<RevenuesScreen />} />

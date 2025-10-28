@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Chip, Tooltip } from '@mui/material';
+import { Chip, Tooltip, type ChipProps } from '@mui/material';
 import { apiClient } from '../api/client';
 
 export function BackendStatus() {
@@ -14,10 +14,11 @@ export function BackendStatus() {
         if (!mounted) return;
         setStatus(res.data?.status === 'ok' ? 'ok' : 'down');
         setDetail(JSON.stringify(res.data));
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!mounted) return;
         setStatus('down');
-        setDetail(err?.message ?? 'Request failed');
+        const message = err instanceof Error ? err.message : 'Request failed';
+        setDetail(message);
       }
     })();
     return () => {
@@ -25,12 +26,12 @@ export function BackendStatus() {
     };
   }, []);
 
-  const color = status === 'ok' ? 'success' : status === 'down' ? 'error' : 'default';
+  const color: ChipProps['color'] = status === 'ok' ? 'success' : status === 'down' ? 'error' : 'default';
   const label = status === 'ok' ? 'Backend: OK' : status === 'down' ? 'Backend: DOWN' : 'Backend: ...';
 
   return (
     <Tooltip title={detail || ''}>
-      <Chip size="small" color={color as any} label={label} variant={status === 'ok' ? 'filled' : 'outlined'} />
+      <Chip size="small" color={color} label={label} variant={status === 'ok' ? 'filled' : 'outlined'} />
     </Tooltip>
   );
 }

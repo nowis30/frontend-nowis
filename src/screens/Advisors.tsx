@@ -175,6 +175,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
   const [interviewStarted, setInterviewStarted] = useState(false);
   const [interviewLoading, setInterviewLoading] = useState(false);
   const [interviewCompleted, setInterviewCompleted] = useState(false);
+  const [interviewConversationId, setInterviewConversationId] = useState<number | null>(null);
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [interviewInput, setInterviewInput] = useState('');
   const [interviewNextQuestion, setInterviewNextQuestion] = useState<AdvisorConvoNextQuestion | null>(null);
@@ -395,6 +396,7 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
       setInterviewStarted(false);
       setInterviewLoading(false);
       setInterviewCompleted(false);
+      setInterviewConversationId(null);
       setInterviewError(null);
       setInterviewInput('');
       setInterviewNextQuestion(null);
@@ -481,11 +483,12 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     interviewAnsweredRef.current = new Set();
     try {
       const prompt = buildInitialInterviewPrompt();
-      const step = await postAdvisorConversation({
-        expertId: interviewExpert,
-        message: prompt,
-        snapshot: {}
-      });
+      const step = await postAdvisorConversation(
+        interviewConversationId
+          ? { conversationId: interviewConversationId, expertId: interviewExpert, message: prompt, snapshot: {} }
+          : { expertId: interviewExpert, message: prompt, snapshot: {} }
+      );
+      setInterviewConversationId(step.conversationId ?? null);
       pushInterviewStep(step);
     } catch (err) {
       console.error('Failed to start guided interview', err);
@@ -529,7 +532,12 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     setInterviewLoading(true);
 
     try {
-      const step = await postAdvisorConversation({ expertId: interviewExpert, message: prompt, snapshot: {} });
+      const step = await postAdvisorConversation(
+        interviewConversationId
+          ? { conversationId: interviewConversationId, expertId: interviewExpert, message: prompt, snapshot: {} }
+          : { expertId: interviewExpert, message: prompt, snapshot: {} }
+      );
+      setInterviewConversationId(step.conversationId ?? null);
       setInterviewInput('');
       pushInterviewStep(step);
     } catch (err) {

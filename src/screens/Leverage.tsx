@@ -267,7 +267,7 @@ export default function LeverageScreen() {
     leverageConversation.mutate(payload);
   }
 
-  const summary = leverageConversation.data?.summary ?? null;
+  // const summary = leverageConversation.data?.summary ?? null; // unused
 
   return (
     <Stack spacing={4}>
