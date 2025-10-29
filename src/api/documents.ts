@@ -13,6 +13,7 @@ export interface DocumentDto {
   checksum: string | null;
   taxYear: number | null;
   shareholderId: number | null;
+  metadata?: any | null;
   createdAt: string;
   updatedAt: string;
 }

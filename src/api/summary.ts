@@ -75,6 +75,23 @@ export interface SummaryResponse {
   properties: SummaryKpi[];
   totals: SummaryTotals;
   corporate: CorporateSummary;
+  personal?: {
+    latestTaxYear: number | null;
+    shareholderId: number | null;
+    taxableIncome: number;
+    employmentIncome: number;
+    businessIncome: number;
+    eligibleDividends: number;
+    nonEligibleDividends: number;
+    capitalGains: number;
+    deductions: number;
+    federalTax: number;
+    provincialTax: number;
+    balanceDue: number;
+    returnsCount: number;
+    slipsCount: number;
+    slipTypeCounts?: Array<{ slipType: string; count: number }>;
+  };
 }
 
 export function useSummary() {

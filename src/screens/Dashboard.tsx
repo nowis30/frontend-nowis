@@ -12,11 +12,14 @@ import {
 import {
   Box,
   Button,
+  Chip as MuiChip,
   Chip,
   CircularProgress,
   Divider,
   Grid,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Typography
 } from '@mui/material';
@@ -24,9 +27,11 @@ import {
 import { useAuthStore } from '../store/authStore';
 
 import { apiClient } from '../api/client';
-import { useSummary } from '../api/summary';
+import { useSummary, type SummaryResponse } from '../api/summary';
 import { downloadBlob } from '../utils/download';
 import ProfileProjectionCard from '../components/ProfileProjectionCard';
+import { useProfileInsights } from '../api/profileInsights';
+import { useAvailableReturnYears, usePersonalReturn } from '../api/personalReturns';
 
 function DashboardScreen() {
   const { data, isLoading } = useSummary();
@@ -124,6 +129,29 @@ function DashboardScreen() {
       helper: 'Somme des états financiers'
     }
   ];
+
+  const personal = (data as SummaryResponse).personal;
+  const [selectedYear, setSelectedYear] = useState<number | undefined>(personal?.latestTaxYear ?? undefined);
+  const { data: availableYears } = useAvailableReturnYears();
+  const relevantYears = (availableYears || []).filter(
+    (e) => !personal?.shareholderId || e.shareholderId === personal.shareholderId
+  );
+  const { data: fetchedReturn } = usePersonalReturn(
+    personal?.shareholderId ?? undefined,
+    selectedYear && personal?.latestTaxYear !== selectedYear ? selectedYear : undefined
+  );
+
+  const { data: insights } = useProfileInsights();
+
+  const computedSlipTypeCounts = fetchedReturn?.slips
+    ? Object.entries(
+        fetchedReturn.slips.reduce<Record<string, number>>((acc, s) => {
+          const key = (s.slipType || 'UNKNOWN').toUpperCase();
+          acc[key] = (acc[key] ?? 0) + 1;
+          return acc;
+        }, {})
+      ).map(([slipType, count]) => ({ slipType, count }))
+    : [];
 
   const handleExportCsv = async () => {
     try {
@@ -266,6 +294,131 @@ function DashboardScreen() {
             </Stack>
           </Paper>
         </Grid>
+
+        {insights && insights.length > 0 && (
+          <Grid item xs={12} md={7}>
+            <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Typography variant="h6">Recommandations personnalisées</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Basées sur vos actifs, dépenses et votre dernier rapport d'impôt.
+              </Typography>
+              <Divider />
+              <Stack spacing={1.5}>
+                {insights.slice(0, 5).map((i) => (
+                  <Stack key={i.code} direction="row" spacing={1.5} alignItems="center">
+                    <MuiChip
+                      size="small"
+                      label={i.severity === 'critical' ? 'Critique' : i.severity === 'warning' ? 'Alerte' : 'Info'}
+                      color={i.severity === 'critical' ? 'error' : i.severity === 'warning' ? 'warning' : 'default'}
+                      variant={i.severity === 'info' ? 'outlined' : 'filled'}
+                    />
+                    <Typography variant="body2">{i.message}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+              <Stack direction="row" spacing={1.5} sx={{ mt: 1 }}>
+                <Button size="small" variant="outlined" onClick={() => navigate('/personal-incomes')}>
+                  Ouvrir Incomes
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => navigate('/financial-goals')}>
+                  Ajuster objectifs
+                </Button>
+              </Stack>
+            </Paper>
+          </Grid>
+        )}
+
+        {personal && (
+          <Grid item xs={12} md={7}>
+            <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Stack direction="row" alignItems="center" spacing={2}>
+                <Typography variant="h6" sx={{ flexGrow: 1 }}>
+                  Revenus personnels
+                </Typography>
+                {relevantYears.length > 1 && (
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography variant="body2" color="text.secondary">Année</Typography>
+                    <Select
+                      size="small"
+                      value={selectedYear ?? ''}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                      displayEmpty
+                    >
+                      {relevantYears.map((y) => (
+                        <MenuItem key={`${y.shareholderId}-${y.taxYear}`} value={y.taxYear}>
+                          {y.taxYear}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </Stack>
+                )}
+              </Stack>
+              <Divider />
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={4}>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Revenu imposable
+                  </Typography>
+                  <Typography variant="h6">
+                    {formatter.format(
+                      selectedYear && selectedYear !== personal.latestTaxYear
+                        ? fetchedReturn?.return?.taxableIncome ?? 0
+                        : personal.taxableIncome
+                    )}
+                  </Typography>
+                  {(!selectedYear || selectedYear === personal.latestTaxYear) && (
+                    <Typography variant="body2" color="text.secondary">
+                      Emploi&nbsp;: {formatter.format(personal.employmentIncome)}<br />
+                      Affaires&nbsp;: {formatter.format(personal.businessIncome)}<br />
+                      Dividendes&nbsp;: {formatter.format(personal.eligibleDividends + personal.nonEligibleDividends)}<br />
+                      Gains en capital&nbsp;: {formatter.format(personal.capitalGains)}
+                    </Typography>
+                  )}
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Déductions / Crédits
+                  </Typography>
+                  {(!selectedYear || selectedYear === personal.latestTaxYear) ? (
+                    <>
+                      <Typography variant="h6">{formatter.format(personal.deductions)}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Impôts fédéral&nbsp;: {formatter.format(personal.federalTax)}<br />
+                        Impôts provincial&nbsp;: {formatter.format(personal.provincialTax)}<br />
+                        Solde à payer&nbsp;: {formatter.format(personal.balanceDue)}
+                      </Typography>
+                    </>
+                  ) : (
+                    <>
+                      <Typography variant="h6">{formatter.format(0)}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Impôts fédéral&nbsp;: {formatter.format(fetchedReturn?.return?.federalTax ?? 0)}<br />
+                        Impôts provincial&nbsp;: {formatter.format(fetchedReturn?.return?.provincialTax ?? 0)}<br />
+                        Solde à payer&nbsp;: {formatter.format(fetchedReturn?.return?.balanceDue ?? 0)}
+                      </Typography>
+                    </>
+                  )}
+                </Box>
+              </Stack>
+              {((!selectedYear || selectedYear === personal.latestTaxYear) && personal.slipTypeCounts && personal.slipTypeCounts.length > 0) ||
+              (selectedYear && selectedYear !== personal.latestTaxYear && computedSlipTypeCounts.length > 0) ? (
+                <>
+                  <Divider />
+                  <Typography variant="subtitle2" color="text.secondary">Principaux feuillets</Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    {selectedYear && selectedYear !== personal.latestTaxYear
+                      ? computedSlipTypeCounts.map((s: { slipType: string; count: number }) => (
+                          <MuiChip key={s.slipType} label={`${s.slipType} · ${s.count}`} size="small" />
+                        ))
+                      : personal.slipTypeCounts!.map((s: { slipType: string; count: number }) => (
+                          <MuiChip key={s.slipType} label={`${s.slipType} · ${s.count}`} size="small" />
+                        ))}
+                  </Stack>
+                </>
+              ) : null}
+            </Paper>
+          </Grid>
+        )}
 
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', gap: 1.5 }}>

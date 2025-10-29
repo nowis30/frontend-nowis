@@ -44,6 +44,7 @@ import {
 } from '../api/personalIncome';
 import { useComputePersonalTaxReturn } from '../api/tax';
 import { buildDocumentDownloadUrl, reingestDocument, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
+import { useMutateReturnLines, useMutateSlipLines, useMutateSlips } from '../api/personalReturns';
 
 interface PersonalIncomeFormState {
   shareholderId: number | null;
@@ -332,6 +333,17 @@ function PersonalIncomeScreen() {
 
   const isSaving = createIncome.isPending || updateIncome.isPending;
 
+  // --- Mutations pour édition des feuillets et lignes ---
+  const slipsMut = useMutateSlips();
+  const slipLinesMut = useMutateSlipLines();
+  const returnLinesMut = useMutateReturnLines();
+
+  // États d'édition pour feuillet et lignes de feuillet
+  const [editingSlipId, setEditingSlipId] = useState<number | null>(null);
+  const [slipForm, setSlipForm] = useState<{ slipType: string; issuer: string; accountNumber: string }>({ slipType: '', issuer: '', accountNumber: '' });
+  const [editingSlipLineId, setEditingSlipLineId] = useState<number | null>(null);
+  const [slipLineForm, setSlipLineForm] = useState<{ code: string; label: string; amount: number }>({ code: '', label: '', amount: 0 });
+
   const handleCalculateTax = () => {
     setCalculationError(null);
 
@@ -477,6 +489,7 @@ function PersonalIncomeScreen() {
                 <TableCell>Nom</TableCell>
                 <TableCell>Taille</TableCell>
                 <TableCell>Date</TableCell>
+                <TableCell>Statut</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -486,6 +499,16 @@ function PersonalIncomeScreen() {
                   <TableCell>{d.label}</TableCell>
                   <TableCell>{(d.size / 1024).toFixed(1)} Ko</TableCell>
                   <TableCell>{new Date(d.createdAt).toLocaleString()}</TableCell>
+                  <TableCell>
+                    {d.metadata?.import?.status ? (
+                      <>
+                        <strong>{d.metadata.import.status}</strong>
+                        {typeof d.metadata.import.taxYear === 'number' ? ` · ${d.metadata.import.taxYear}` : ''}
+                      </>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">—</Typography>
+                    )}
+                  </TableCell>
                   <TableCell align="right">
                     <IconButton aria-label="ouvrir" href={buildDocumentDownloadUrl(d.id)} target="_blank" rel="noopener">
                       <LaunchIcon />
@@ -808,11 +831,71 @@ function PersonalIncomeScreen() {
               {fullReturn.slips.map((s) => (
                 <Paper key={s.id} variant="outlined" sx={{ p: 2 }}>
                   <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} spacing={1}>
-                    <Typography variant="subtitle1">{s.slipType}</Typography>
-                    <Stack direction="row" spacing={2}>
-                      <Typography variant="body2" color="text.secondary">Émetteur: {s.issuer || '—'}</Typography>
-                      <Typography variant="body2" color="text.secondary">Compte: {s.accountNumber || '—'}</Typography>
-                    </Stack>
+                    {editingSlipId === s.id ? (
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} sx={{ flex: 1 }}>
+                        <TextField
+                          label="Feuillet"
+                          size="small"
+                          value={slipForm.slipType}
+                          onChange={(e) => setSlipForm((f) => ({ ...f, slipType: e.target.value }))}
+                        />
+                        <TextField
+                          label="Émetteur"
+                          size="small"
+                          value={slipForm.issuer}
+                          onChange={(e) => setSlipForm((f) => ({ ...f, issuer: e.target.value }))}
+                        />
+                        <TextField
+                          label="Compte"
+                          size="small"
+                          value={slipForm.accountNumber}
+                          onChange={(e) => setSlipForm((f) => ({ ...f, accountNumber: e.target.value }))}
+                        />
+                        <Stack direction="row" spacing={1}>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            onClick={() => {
+                              slipsMut.update.mutate(
+                                { slipId: s.id, payload: { slipType: slipForm.slipType, issuer: slipForm.issuer || null, accountNumber: slipForm.accountNumber || null } },
+                                {
+                                  onSuccess: () => {
+                                    setEditingSlipId(null);
+                                  }
+                                }
+                              );
+                            }}
+                          >
+                            Enregistrer
+                          </Button>
+                          <Button size="small" onClick={() => setEditingSlipId(null)}>Annuler</Button>
+                        </Stack>
+                      </Stack>
+                    ) : (
+                      <>
+                        <Typography variant="subtitle1">{s.slipType}</Typography>
+                        <Stack direction="row" spacing={2} alignItems="center">
+                          <Typography variant="body2" color="text.secondary">Émetteur: {s.issuer || '—'}</Typography>
+                          <Typography variant="body2" color="text.secondary">Compte: {s.accountNumber || '—'}</Typography>
+                          <IconButton aria-label="modifier feuillet" size="small" onClick={() => {
+                            setEditingSlipId(s.id);
+                            setSlipForm({ slipType: s.slipType, issuer: s.issuer || '', accountNumber: s.accountNumber || '' });
+                          }}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton aria-label="supprimer feuillet" size="small" onClick={() => {
+                            const ok = window.confirm(`Supprimer le feuillet ${s.slipType} ?`);
+                            if (!ok) return;
+                            slipsMut.remove.mutate({ slipId: s.id });
+                          }}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                          <Button size="small" variant="outlined" onClick={() => {
+                            slipLinesMut.create.mutate({ slipId: s.id, payload: { label: 'Nouvelle ligne', amount: 0 } });
+                          }}>Ajouter une ligne</Button>
+                        </Stack>
+                      </>
+                    )}
                   </Stack>
                   <Table size="small" sx={{ mt: 1 }}>
                     <TableHead>
@@ -820,14 +903,79 @@ function PersonalIncomeScreen() {
                         <TableCell>Code</TableCell>
                         <TableCell>Libellé</TableCell>
                         <TableCell align="right">Montant</TableCell>
+                        <TableCell align="right">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {s.lines.map((li) => (
-                        <TableRow key={li.id}>
-                          <TableCell>{li.code || '—'}</TableCell>
-                          <TableCell>{li.label}</TableCell>
-                          <TableCell align="right">{currencyFormatter.format(li.amount)}</TableCell>
+                        <TableRow key={li.id} hover>
+                          {editingSlipLineId === li.id ? (
+                            <>
+                              <TableCell sx={{ width: 140 }}>
+                                <TextField
+                                  size="small"
+                                  value={slipLineForm.code}
+                                  onChange={(e) => setSlipLineForm((f) => ({ ...f, code: e.target.value }))}
+                                  placeholder="Code"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <TextField
+                                  size="small"
+                                  fullWidth
+                                  value={slipLineForm.label}
+                                  onChange={(e) => setSlipLineForm((f) => ({ ...f, label: e.target.value }))}
+                                  placeholder="Libellé"
+                                />
+                              </TableCell>
+                              <TableCell align="right" sx={{ width: 180 }}>
+                                <TextField
+                                  size="small"
+                                  type="number"
+                                  inputProps={{ step: 0.01 }}
+                                  value={slipLineForm.amount}
+                                  onChange={(e) => setSlipLineForm((f) => ({ ...f, amount: Number(e.target.value) || 0 }))}
+                                />
+                              </TableCell>
+                              <TableCell align="right" sx={{ width: 200 }}>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  onClick={() => {
+                                    slipLinesMut.update.mutate(
+                                      { slipId: s.id, lineId: li.id, payload: { code: slipLineForm.code || null, label: slipLineForm.label, amount: slipLineForm.amount } },
+                                      { onSuccess: () => setEditingSlipLineId(null) }
+                                    );
+                                  }}
+                                  sx={{ mr: 1 }}
+                                >
+                                  Enregistrer
+                                </Button>
+                                <Button size="small" onClick={() => setEditingSlipLineId(null)}>Annuler</Button>
+                              </TableCell>
+                            </>
+                          ) : (
+                            <>
+                              <TableCell>{li.code || '—'}</TableCell>
+                              <TableCell>{li.label}</TableCell>
+                              <TableCell align="right">{currencyFormatter.format(li.amount)}</TableCell>
+                              <TableCell align="right">
+                                <IconButton aria-label="modifier" size="small" onClick={() => {
+                                  setEditingSlipLineId(li.id);
+                                  setSlipLineForm({ code: li.code || '', label: li.label, amount: li.amount });
+                                }} sx={{ mr: 0.5 }}>
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                                <IconButton aria-label="supprimer" size="small" onClick={() => {
+                                  const ok = window.confirm(`Supprimer la ligne "${li.label}" ?`);
+                                  if (!ok) return;
+                                  slipLinesMut.remove.mutate({ slipId: s.id, lineId: li.id });
+                                }}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </TableCell>
+                            </>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>

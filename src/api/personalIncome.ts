@@ -281,6 +281,9 @@ export interface ImportPersonalTaxResponse {
   extracted: ImportPersonalTaxResultItem[];
   createdIds: number[];
   documentId?: number;
+  taxReturnId?: number;
+  duplicate?: boolean;
+  status?: 'OK' | 'PARTIAL' | 'INCOMPLETE' | 'DUPLICATE';
 }
 
 export function useImportPersonalTaxReturn() {
