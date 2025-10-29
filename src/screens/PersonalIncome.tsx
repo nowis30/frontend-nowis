@@ -45,6 +45,7 @@ import {
 import { useComputePersonalTaxReturn } from '../api/tax';
 import { buildDocumentDownloadUrl, reingestDocument, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
 import { useMutateReturnLines, useMutateSlipLines, useMutateSlips } from '../api/personalReturns';
+import { diffProfileEntries } from './personalIncomeDiff';
 
 interface PersonalIncomeFormState {
   shareholderId: number | null;
@@ -155,6 +156,8 @@ function PersonalIncomeScreen() {
   const computePersonalTax = useComputePersonalTaxReturn();
   const { data: profile } = usePersonalProfile();
   const updateProfile = useUpdatePersonalProfile();
+  // Confirmation avant sauvegarde du profil
+  const [confirmProfileOpen, setConfirmProfileOpen] = useState(false);
   // Documents importés (personnel)
   const [showAllDocs, setShowAllDocs] = useState(false);
   const { data: documents } = useDocuments({ domain: 'personal-income', taxYear: showAllDocs ? undefined as any : selectedTaxYear });
@@ -207,6 +210,9 @@ function PersonalIncomeScreen() {
     if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
     return String(Math.max(0, age));
   }, [profileForm.birthDate]);
+
+  const diffProfile = useMemo(() => diffProfileEntries(profile, profileForm), [profile, profileForm]);
+  const hasProfileChanges = diffProfile.length > 0;
 
   const currencyFormatter = useMemo(
     () =>
@@ -441,14 +447,10 @@ function PersonalIncomeScreen() {
           <Grid item xs={12} md="auto">
             <Button
               variant="contained"
-              onClick={() =>
-                updateProfile.mutate({
-                  displayName: profileForm.displayName || undefined,
-                  gender: (profileForm.gender || undefined) as any,
-                  birthDate: profileForm.birthDate || undefined,
-                  address: profileForm.address || null
-                })
-              }
+              onClick={() => {
+                if (hasProfileChanges) setConfirmProfileOpen(true);
+                else notify('Aucun changement à enregistrer.', 'info');
+              }}
               disabled={updateProfile.isPending}
             >
               Enregistrer le profil
@@ -1222,6 +1224,57 @@ function PersonalIncomeScreen() {
         <DialogActions>
           <Button onClick={closeRename}>Annuler</Button>
           <Button variant="contained" onClick={confirmRename} disabled={updateDocument.isPending}>Enregistrer</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={confirmProfileOpen} onClose={() => setConfirmProfileOpen(false)} fullWidth>
+        <DialogTitle>Confirmer la mise à jour du profil</DialogTitle>
+        <DialogContent>
+          {diffProfile.length === 0 ? (
+            <Typography>Aucun changement détecté.</Typography>
+          ) : (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Les informations suivantes seront mises à jour:
+              </Typography>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Champ</TableCell>
+                    <TableCell>Actuel</TableCell>
+                    <TableCell>Nouveau</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {diffProfile.map((row) => (
+                    <TableRow key={row.key}>
+                      <TableCell>{row.key}</TableCell>
+                      <TableCell>{row.from || '—'}</TableCell>
+                      <TableCell>{row.to || '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmProfileOpen(false)}>Annuler</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setConfirmProfileOpen(false);
+              updateProfile.mutate({
+                displayName: profileForm.displayName || undefined,
+                gender: (profileForm.gender || undefined) as any,
+                birthDate: profileForm.birthDate || undefined,
+                address: profileForm.address || null
+              }, { onSuccess: () => notify('Profil mis à jour.', 'success') });
+            }}
+            disabled={updateProfile.isPending}
+          >
+            Confirmer
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

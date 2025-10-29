@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bar,
@@ -27,7 +27,7 @@ import {
 import { useAuthStore } from '../store/authStore';
 
 import { apiClient } from '../api/client';
-import { useSummary, type SummaryResponse } from '../api/summary';
+import { useSummary } from '../api/summary';
 import { downloadBlob } from '../utils/download';
 import ProfileProjectionCard from '../components/ProfileProjectionCard';
 import { useProfileInsights } from '../api/profileInsights';
@@ -35,10 +35,32 @@ import { useAvailableReturnYears, usePersonalReturn } from '../api/personalRetur
 
 function DashboardScreen() {
   const { data, isLoading } = useSummary();
+  const personal = data?.personal ?? undefined;
+  const latestTaxYear = personal?.latestTaxYear ?? undefined;
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const navigate = useNavigate();
   const setToken = useAuthStore((state) => state.setToken);
+  const [selectedYear, setSelectedYear] = useState<number | undefined>(() => latestTaxYear);
+  const { data: availableYears } = useAvailableReturnYears();
+  const { data: insights } = useProfileInsights();
+  const { data: fetchedReturn } = usePersonalReturn(
+    personal?.shareholderId ?? undefined,
+    selectedYear && personal?.latestTaxYear !== selectedYear ? selectedYear : undefined
+  );
+
+  useEffect(() => {
+    if (latestTaxYear === undefined) {
+      if (selectedYear !== undefined) {
+        setSelectedYear(undefined);
+      }
+      return;
+    }
+
+    if (selectedYear === undefined) {
+      setSelectedYear(latestTaxYear);
+    }
+  }, [latestTaxYear, selectedYear]);
 
   const chartData = useMemo(
     () =>
@@ -130,19 +152,10 @@ function DashboardScreen() {
     }
   ];
 
-  const personal = (data as SummaryResponse).personal;
-  const [selectedYear, setSelectedYear] = useState<number | undefined>(personal?.latestTaxYear ?? undefined);
-  const { data: availableYears } = useAvailableReturnYears();
   const availableYearList = Array.isArray(availableYears) ? availableYears : [];
   const relevantYears = availableYearList.filter(
     (e) => !personal?.shareholderId || e.shareholderId === personal.shareholderId
   );
-  const { data: fetchedReturn } = usePersonalReturn(
-    personal?.shareholderId ?? undefined,
-    selectedYear && personal?.latestTaxYear !== selectedYear ? selectedYear : undefined
-  );
-
-  const { data: insights } = useProfileInsights();
 
   const computedSlipTypeCounts = fetchedReturn?.slips
     ? Object.entries(
@@ -159,8 +172,9 @@ function DashboardScreen() {
       setExportingCsv(true);
       const response = await apiClient.get('/summary/export/csv', { responseType: 'blob' });
       const date = new Date().toISOString().split('T')[0];
-      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      downloadBlob(blob, `bilan-nowis-${date}.csv`);
+      const maybeData = response && (Object.prototype.hasOwnProperty.call(response, 'data') ? (response as any).data : response);
+      const blob = maybeData instanceof Blob ? maybeData : new Blob([maybeData ?? ''], { type: 'text/csv;charset=utf-8;' });
+      downloadBlob(blob as Blob, `bilan-nowis-${date}.csv`);
     } catch (error) {
       console.error('Erreur export CSV', error);
     } finally {
@@ -172,9 +186,10 @@ function DashboardScreen() {
     try {
       setExportingPdf(true);
       const response = await apiClient.get('/summary/export/pdf', { responseType: 'blob' });
-      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const maybeData = response && (Object.prototype.hasOwnProperty.call(response, 'data') ? (response as any).data : response);
+      const blob = maybeData instanceof Blob ? maybeData : new Blob([maybeData ?? ''], { type: 'application/pdf' });
       const date = new Date().toISOString().split('T')[0];
-      downloadBlob(blob, `bilan-nowis-${date}.pdf`);
+      downloadBlob(blob as Blob, `bilan-nowis-${date}.pdf`);
     } catch (error) {
       console.error('Erreur export PDF', error);
     } finally {
