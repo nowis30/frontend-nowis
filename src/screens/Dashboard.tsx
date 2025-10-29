@@ -133,7 +133,8 @@ function DashboardScreen() {
   const personal = (data as SummaryResponse).personal;
   const [selectedYear, setSelectedYear] = useState<number | undefined>(personal?.latestTaxYear ?? undefined);
   const { data: availableYears } = useAvailableReturnYears();
-  const relevantYears = (availableYears || []).filter(
+  const availableYearList = Array.isArray(availableYears) ? availableYears : [];
+  const relevantYears = availableYearList.filter(
     (e) => !personal?.shareholderId || e.shareholderId === personal.shareholderId
   );
   const { data: fetchedReturn } = usePersonalReturn(
