@@ -103,8 +103,10 @@ export function useGraphNodes() {
 
 export function useGraphRecalc() {
   return useMutation({
-    mutationFn: async (source: DagNodeId) => {
-      const { data } = await apiClient.post<{ at: string; source: DagNodeId; order: DagNodeId[] }>(`/graph/recalc`, { source });
+    // Accept either a DagNodeId or an object with { source, year }
+    mutationFn: async (input: DagNodeId | { source: DagNodeId; year?: number | null }) => {
+      const payload = typeof input === 'string' ? { source: input } : { source: input.source, year: input.year ?? undefined };
+      const { data } = await apiClient.post<{ at: string; source: DagNodeId; order: DagNodeId[] }>(`/graph/recalc`, payload);
       return data;
     }
   });

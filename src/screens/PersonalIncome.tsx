@@ -1229,8 +1229,21 @@ function PersonalIncomeScreen() {
             <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
               <Typography variant="h6">Graphe de dépendances</Typography>
               <Stack direction="row" spacing={1}>
-                <Button size="small" variant="outlined" onClick={() => graphRecalc.mutate('Tax')} disabled={graphRecalc.isPending}>Recalculer depuis Tax</Button>
-                <Button size="small" onClick={() => graphRecalc.mutate('Compta')} disabled={graphRecalc.isPending}>Depuis Compta</Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => graphRecalc.mutate({ source: 'Tax', year: selectedTaxYear })}
+                  disabled={graphRecalc.isPending}
+                >
+                  Recalculer depuis Tax
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => graphRecalc.mutate({ source: 'Compta', year: selectedTaxYear })}
+                  disabled={graphRecalc.isPending}
+                >
+                  Depuis Compta
+                </Button>
               </Stack>
             </Stack>
             {!graph?.nodes?.length ? (
