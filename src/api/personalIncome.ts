@@ -294,6 +294,7 @@ export function useImportPersonalTaxReturn() {
       shareholderId?: number | null;
       taxYear?: number | null;
       autoCreate?: boolean;
+      postToLedger?: boolean;
     }): Promise<ImportPersonalTaxResponse> => {
       const form = new FormData();
       form.append('file', params.file);
@@ -302,6 +303,7 @@ export function useImportPersonalTaxReturn() {
       if (params.shareholderId) sp.set('shareholderId', String(params.shareholderId));
       if (params.taxYear) sp.set('taxYear', String(params.taxYear));
       if (typeof params.autoCreate === 'boolean') sp.set('autoCreate', String(params.autoCreate));
+      if (typeof params.postToLedger === 'boolean') sp.set('postToLedger', String(params.postToLedger));
       const { data } = await apiClient.post<ImportPersonalTaxResponse>(
         `/ai/ingest?${sp.toString()}`,
         form,
@@ -311,6 +313,39 @@ export function useImportPersonalTaxReturn() {
     },
     onSuccess: () => {
       invalidatePersonalIncomeQueries(queryClient);
+    }
+  });
+}
+
+// --- Why/personal-income ---
+export interface WhyPersonalIncomeDto {
+  shareholder: { id: number; displayName: string };
+  taxYear: number;
+  totalIncome: number;
+  items: { id: number; category: PersonalIncomeCategory | string; label: string; amount: number; source?: string | null; slipType?: string | null }[];
+  taxReturn: {
+    id: number;
+    taxableIncome: number;
+    federalTax: number;
+    provincialTax: number;
+    balanceDue: number;
+    lines: { id: number; section: string; code: string | null; label: string; amount: number; orderIndex: number }[];
+    slips: { id: number; slipType: string; issuer: string | null; accountNumber: string | null; lines: { id: number; code: string | null; label: string; amount: number; orderIndex: number }[] }[];
+  } | null;
+  journal: { entries: { id: number; entryDate: string; description: string | null; reference: string | null; lines: { id: number; accountCode: string; debit: number; credit: number; memo: string | null }[] }[] };
+}
+
+export function useWhyPersonalIncome(shareholderId?: number | null, taxYear?: number | null) {
+  return useQuery<WhyPersonalIncomeDto>({
+    queryKey: ['why-personal-income', shareholderId ?? 'all', taxYear ?? 'all'],
+    enabled: Boolean(shareholderId && taxYear),
+    queryFn: async () => {
+      if (!shareholderId || !taxYear) {
+        throw new Error('Paramètres manquants');
+      }
+      const params = new URLSearchParams({ shareholderId: String(shareholderId), taxYear: String(taxYear) });
+      const { data } = await apiClient.get<WhyPersonalIncomeDto>(`/why/personal-income?${params.toString()}`);
+      return data;
     }
   });
 }

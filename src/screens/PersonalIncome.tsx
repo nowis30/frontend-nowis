@@ -22,6 +22,8 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Switch from '@mui/material/Switch';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LaunchIcon from '@mui/icons-material/Launch';
@@ -38,10 +40,12 @@ import {
   usePersonalProfile,
   useUpdatePersonalProfile,
   usePersonalTaxReturn,
+  useWhyPersonalIncome,
   type PersonalIncomeDto,
   type PersonalIncomeCategory,
   type PersonalIncomePayload
 } from '../api/personalIncome';
+import { useGraphNodes, useGraphRecalc, useRecentEvents } from '../api/diagnostics';
 import { useComputePersonalTaxReturn } from '../api/tax';
 import { buildDocumentDownloadUrl, reingestDocument, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
 import { useMutateReturnLines, useMutateSlipLines, useMutateSlips } from '../api/personalReturns';
@@ -153,6 +157,7 @@ function PersonalIncomeScreen() {
   const deleteIncome = useDeletePersonalIncome();
   const updateIncome = useUpdatePersonalIncome(editingIncomeId);
   const importTax = useImportPersonalTaxReturn();
+  const whyQuery = useWhyPersonalIncome(selectedShareholderId, selectedTaxYear);
   const computePersonalTax = useComputePersonalTaxReturn();
   const { data: profile } = usePersonalProfile();
   const updateProfile = useUpdatePersonalProfile();
@@ -165,6 +170,12 @@ function PersonalIncomeScreen() {
   const deleteDocument = useDeleteDocument();
   const [renameDocId, setRenameDocId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState<string>('');
+  const [postToLedger, setPostToLedger] = useState<boolean>(false);
+  const [whyOpen, setWhyOpen] = useState(false);
+  // Diagnostics
+  const { data: recentEvents } = useRecentEvents(15);
+  const { data: graph } = useGraphNodes();
+  const graphRecalc = useGraphRecalc();
 
   const openRename = (id: number, current: string) => {
     setRenameDocId(id);
@@ -623,6 +634,10 @@ function PersonalIncomeScreen() {
           <Button variant="contained" onClick={handleOpenForm} disabled={!selectedShareholderId}>
             Ajouter un revenu
           </Button>
+          <FormControlLabel
+            control={<Switch checked={postToLedger} onChange={(e) => setPostToLedger(e.target.checked)} />}
+            label="Publier au grand livre"
+          />
           <Button
             variant="outlined"
             component="label"
@@ -641,7 +656,8 @@ function PersonalIncomeScreen() {
                     file,
                     shareholderId: selectedShareholderId,
                     taxYear: selectedTaxYear,
-                    autoCreate: true
+                    autoCreate: true,
+                    postToLedger
                   });
                   // Aligne l'année affichée avec l'année extraite/cible
                   if (Number.isFinite(taxYear)) {
@@ -728,9 +744,12 @@ function PersonalIncomeScreen() {
       <Grid container spacing={3} mt={0} sx={{ mt: 0, pt: 4 }}>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3, height: '100%' }}>
-            <Typography variant="h6" gutterBottom>
-              Résumé par catégorie
-            </Typography>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
+              <Typography variant="h6">Résumé par catégorie</Typography>
+              <Button size="small" variant="text" onClick={() => setWhyOpen(true)} disabled={!selectedShareholderId}>
+                Pourquoi ce total ?
+              </Button>
+            </Stack>
             {isLoadingSummary ? (
               <Typography>Calcul du résumé...</Typography>
             ) : summary ? (
@@ -815,6 +834,76 @@ function PersonalIncomeScreen() {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Dialog Explicabilité */}
+      <Dialog open={whyOpen} onClose={() => setWhyOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle>Pourquoi ce total ?</DialogTitle>
+        <DialogContent dividers>
+          {whyQuery.isLoading ? (
+            <Typography>Chargement…</Typography>
+          ) : whyQuery.isError ? (
+            <Alert severity="error">Impossible de récupérer l'explication.</Alert>
+          ) : whyQuery.data ? (
+            <Stack spacing={2}>
+              <Typography>
+                Actionnaire: <strong>{whyQuery.data.shareholder.displayName}</strong> — Année: <strong>{whyQuery.data.taxYear}</strong>
+              </Typography>
+              <Typography>
+                Total des revenus saisis: <strong>{currencyFormatter.format(whyQuery.data.totalIncome)}</strong>
+              </Typography>
+              {whyQuery.data.taxReturn && (
+                <Box>
+                  <Typography variant="subtitle1">Déclarations d'impôt (agrégats)</Typography>
+                  <Stack direction="row" spacing={2}>
+                    <Typography>Revenu imposable: {currencyFormatter.format(whyQuery.data.taxReturn.taxableIncome)}</Typography>
+                    <Typography>Fédéral: {currencyFormatter.format(whyQuery.data.taxReturn.federalTax)}</Typography>
+                    <Typography>Provincial: {currencyFormatter.format(whyQuery.data.taxReturn.provincialTax)}</Typography>
+                  </Stack>
+                </Box>
+              )}
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>Écritures comptables postées</Typography>
+                {whyQuery.data.journal.entries.length === 0 ? (
+                  <Typography color="text.secondary">Aucune écriture trouvée (essaie de publier au grand livre).</Typography>
+                ) : (
+                  <Stack spacing={2}>
+                    {whyQuery.data.journal.entries.map((entry) => (
+                      <Box key={entry.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
+                        <Typography fontWeight={600}>{entry.entryDate} — {entry.description ?? 'Écriture'}</Typography>
+                        <Table size="small" sx={{ mt: 1 }}>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell>Compte</TableCell>
+                              <TableCell align="right">Débit</TableCell>
+                              <TableCell align="right">Crédit</TableCell>
+                              <TableCell>Mémo</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {entry.lines.map((l) => (
+                              <TableRow key={l.id}>
+                                <TableCell>{l.accountCode}</TableCell>
+                                <TableCell align="right">{l.debit ? currencyFormatter.format(l.debit) : '—'}</TableCell>
+                                <TableCell align="right">{l.credit ? currencyFormatter.format(l.credit) : '—'}</TableCell>
+                                <TableCell>{l.memo ?? '—'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </Box>
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            </Stack>
+          ) : (
+            <Typography>Aucune donnée disponible.</Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setWhyOpen(false)}>Fermer</Button>
+        </DialogActions>
+      </Dialog>
 
       <Paper sx={{ p: 3, mt: 4 }}>
         <Stack spacing={2}>
@@ -1101,6 +1190,62 @@ function PersonalIncomeScreen() {
           )}
         </Stack>
       </Paper>
+
+      {/* Diagnostics: événements récents et graphe */}
+      <Grid container spacing={3} sx={{ mt: 0, pt: 4 }}>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>Événements récents</Typography>
+            {(!recentEvents || recentEvents.length === 0) ? (
+              <Typography variant="body2" color="text.secondary">Aucun événement récent.</Typography>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell>Détails</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {recentEvents.map((ev, idx) => (
+                    <TableRow key={idx} hover>
+                      <TableCell sx={{ whiteSpace: 'nowrap' }}>{new Date(ev.at).toLocaleString()}</TableCell>
+                      <TableCell>{ev.type}</TableCell>
+                      <TableCell>
+                        <Typography variant="caption" color="text.secondary">
+                          {Object.keys(ev).filter(k => !['type','at'].includes(k)).slice(0,3).map(k => `${k}: ${String((ev as any)[k])}`).join(' · ') || '—'}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+              <Typography variant="h6">Graphe de dépendances</Typography>
+              <Stack direction="row" spacing={1}>
+                <Button size="small" variant="outlined" onClick={() => graphRecalc.mutate('Tax')} disabled={graphRecalc.isPending}>Recalculer depuis Tax</Button>
+                <Button size="small" onClick={() => graphRecalc.mutate('Compta')} disabled={graphRecalc.isPending}>Depuis Compta</Button>
+              </Stack>
+            </Stack>
+            {!graph?.nodes?.length ? (
+              <Typography variant="body2" color="text.secondary">Aucun nœud enregistré.</Typography>
+            ) : (
+              <Stack spacing={1}>
+                <Typography variant="body2" color="text.secondary">Nœuds: {graph.nodes.join(' → ')}</Typography>
+                {graphRecalc.data && (
+                  <Alert severity="info">Ordre de propagation: {graphRecalc.data.order.join(' → ')}</Alert>
+                )}
+              </Stack>
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
 
       <Dialog open={formOpen} onClose={handleCloseForm} fullWidth>
         <DialogTitle>{editingIncomeId ? 'Modifier un revenu' : 'Nouveau revenu'}</DialogTitle>
