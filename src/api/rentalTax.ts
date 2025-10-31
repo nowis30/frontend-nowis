@@ -159,3 +159,23 @@ export async function downloadRentalTaxPdf(id: number): Promise<Blob> {
   });
   return data;
 }
+
+export function useUpdateRentalTaxStatement() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: number; propertyId?: number | null; notes?: string | null }) => {
+      const payload: Record<string, unknown> = {};
+      if (Object.prototype.hasOwnProperty.call(args, 'propertyId')) {
+        payload.propertyId = args.propertyId ?? null;
+      }
+      if (Object.prototype.hasOwnProperty.call(args, 'notes')) {
+        payload.notes = args.notes ?? null;
+      }
+      const { data } = await apiClient.put<RentalTaxStatementDto>(`/tax/rental-statements/${args.id}`, payload);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rental-tax', 'statements'] });
+    }
+  });
+}

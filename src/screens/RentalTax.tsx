@@ -37,6 +37,7 @@ import {
   prepareRentalTaxStatement,
   useCreateRentalTaxStatement,
   useRentalTaxStatements,
+  useUpdateRentalTaxStatement,
   type RentalTaxCreatePayload,
   type RentalTaxCcaLine,
   type RentalTaxFormPayload,
@@ -104,6 +105,7 @@ function RentalTaxScreen() {
 
   const { data: propertyOptions } = usePropertyOptions();
   const { data: statements, isLoading } = useRentalTaxStatements();
+  const updateMutation = useUpdateRentalTaxStatement();
 
   const prepareMutation = useMutation({
     mutationFn: prepareRentalTaxStatement
@@ -402,7 +404,29 @@ function RentalTaxScreen() {
                   <TableRow key={statement.id} hover>
                     <TableCell>{statement.taxYear}</TableCell>
                     <TableCell>{statement.formType}</TableCell>
-                    <TableCell>{statement.propertyName ?? 'Portefeuille complet'}</TableCell>
+                    <TableCell>
+                      {statement.propertyName ?? (
+                        <FormControl size="small" sx={{ minWidth: 200 }}>
+                          <InputLabel id={`assign-prop-${statement.id}`}>Associer un immeuble</InputLabel>
+                          <Select
+                            labelId={`assign-prop-${statement.id}`}
+                            label="Associer un immeuble"
+                            value=""
+                            onChange={(e) => {
+                              const propId = Number(e.target.value);
+                              if (!Number.isFinite(propId)) return;
+                              updateMutation.mutate({ id: statement.id, propertyId: propId });
+                            }}
+                          >
+                            {propertyOptions?.map((p) => (
+                              <MenuItem key={p.id} value={String(p.id)}>
+                                {p.name}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                    </TableCell>
                     <TableCell align="right">{formatCurrency(statement.computed.netIncome)}</TableCell>
                     <TableCell align="right">{formatDate(statement.createdAt)}</TableCell>
                     <TableCell align="right">
