@@ -322,6 +322,8 @@ function PersonalIncomeScreen() {
       updateIncome.mutate(payload, {
         onSuccess: () => {
           notify('Revenu modifié avec succès.', 'success');
+          // Recalcule les computes dépendants (Compta → Prévisions → Decideur) pour l'année courante
+          graphRecalc.mutate({ source: 'Compta', year: selectedTaxYear });
           handleCloseForm();
         },
         onError
@@ -332,6 +334,8 @@ function PersonalIncomeScreen() {
     createIncome.mutate(payload, {
       onSuccess: () => {
         notify('Revenu ajouté avec succès.', 'success');
+        // Recalcule les computes dépendants (Compta → Prévisions → Decideur) pour l'année courante
+        graphRecalc.mutate({ source: 'Compta', year: selectedTaxYear });
         handleCloseForm();
       },
       onError
@@ -344,8 +348,19 @@ function PersonalIncomeScreen() {
       return;
     }
     deleteIncome.mutate(income.id, {
-      onSuccess: () => notify('Revenu supprimé.', 'success'),
-      onError: () => notify('Erreur lors de la suppression.', 'error')
+      onSuccess: () => {
+        notify('Revenu supprimé.', 'success');
+        // Recalcule les computes dépendants pour répercuter la suppression
+        graphRecalc.mutate({ source: 'Compta', year: selectedTaxYear });
+      },
+      onError: (err: any) => {
+        const msg = err?.response?.data?.error as string | undefined;
+        if (msg) {
+          notify(`Suppression impossible: ${msg}`, 'error');
+        } else {
+          notify('Erreur lors de la suppression.', 'error');
+        }
+      }
     });
   };
 
@@ -673,6 +688,8 @@ function PersonalIncomeScreen() {
                   } else {
                     notify("Aucun revenu identifiable dans le document. Vérifie le PDF ou essaie un autre feuillet.", 'warning');
                   }
+                  // Déclenche un recalcul global depuis la compta pour propager les écritures postées
+                  graphRecalc.mutate({ source: 'Compta', year: taxYear ?? selectedTaxYear });
                 } catch (err: any) {
                   // Afficher des messages plus précis côté UI
                   const status = err?.response?.status as number | undefined;
