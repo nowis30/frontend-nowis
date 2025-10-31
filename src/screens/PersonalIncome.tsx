@@ -45,7 +45,7 @@ import {
   type PersonalIncomeCategory,
   type PersonalIncomePayload
 } from '../api/personalIncome';
-import { useGraphNodes, useGraphRecalc, useRecentEvents } from '../api/diagnostics';
+import { useGraphNodes, useGraphRecalc, useRecentEvents, useGraphOutputs } from '../api/diagnostics';
 import { useComputePersonalTaxReturn } from '../api/tax';
 import { buildDocumentDownloadUrl, reingestDocument, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
 import { useMutateReturnLines, useMutateSlipLines, useMutateSlips } from '../api/personalReturns';
@@ -175,6 +175,7 @@ function PersonalIncomeScreen() {
   // Diagnostics
   const { data: recentEvents } = useRecentEvents(15);
   const { data: graph } = useGraphNodes();
+  const { data: graphOutputs } = useGraphOutputs();
   const graphRecalc = useGraphRecalc();
 
   const openRename = (id: number, current: string) => {
@@ -1253,6 +1254,14 @@ function PersonalIncomeScreen() {
                 <Typography variant="body2" color="text.secondary">Nœuds: {graph.nodes.join(' → ')}</Typography>
                 {graphRecalc.data && (
                   <Alert severity="info">Ordre de propagation: {graphRecalc.data.order.join(' → ')}</Alert>
+                )}
+                {graphOutputs && (
+                  <Box sx={{ mt: 1 }}>
+                    <Typography variant="subtitle2" gutterBottom>Dernières sorties (résumées)</Typography>
+                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 200, overflow: 'auto', background: '#f7f7f7', padding: 8, borderRadius: 4 }}>
+                      {JSON.stringify(graphOutputs, null, 2)}
+                    </pre>
+                  </Box>
                 )}
               </Stack>
             )}

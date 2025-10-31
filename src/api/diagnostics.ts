@@ -101,6 +101,16 @@ export function useGraphNodes() {
   });
 }
 
+export function useGraphOutputs() {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['graph-outputs'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<Record<string, unknown>>(`/graph/outputs`);
+      return data;
+    }
+  });
+}
+
 export function useGraphRecalc() {
   return useMutation({
     // Accept either a DagNodeId or an object with { source, year }
