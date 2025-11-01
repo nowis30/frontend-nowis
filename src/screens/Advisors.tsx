@@ -744,19 +744,6 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     startSpeechCapture(field);
   }
 
-  if (loading) {
-    return (
-      <Stack spacing={3}>
-        <Typography variant="h4">Conseillers IA</Typography>
-        <Typography variant="body1">Chargement du comité d’experts…</Typography>
-      </Stack>
-    );
-  }
-
-  const currentQuestionDefinition = MANUAL_FLOW_ENABLED && currentQuestion
-    ? questions.find((question) => question.id === currentQuestion.id) ?? currentQuestion
-    : null;
-
   // Helpers: extract simple context from collected answers (best-effort parsing)
   const getAnswer = useMemo(
     () => (id: string) => answers.find((a) => a.questionId === id)?.value ?? null,
@@ -777,6 +764,10 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     return raw.includes('%') ? n : n > 1 ? n : n * 100; // accept 0.25 => 25%
   }, [profitMarginAnswer]);
 
+  const currentQuestionDefinition = MANUAL_FLOW_ENABLED && currentQuestion
+    ? questions.find((question) => question.id === currentQuestion.id) ?? currentQuestion
+    : null;
+
   return (
     <Stack spacing={4}>
       <Box>
@@ -787,6 +778,11 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
           L’assistant IA recueille les informations et pré-remplit votre dossier (portefeuille, fiscalité) avant de
           lancer le diagnostic combiné des experts fiscal, comptable, planificateur et avocat.
         </Typography>
+        {loading && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Chargement du comité d’experts…
+          </Typography>
+        )}
         {activeMode ? (
           <Alert
             severity="info"
