@@ -728,7 +728,6 @@ function PersonalIncomeScreen() {
           <Button
             variant="outlined"
             component="label"
-            disabled={!selectedShareholderId}
           >
             Importer un rapport d'impôt
             <input
@@ -737,11 +736,11 @@ function PersonalIncomeScreen() {
               accept="application/pdf,image/*"
               onChange={async (e: ChangeEvent<HTMLInputElement>) => {
                 const file = e.target.files?.[0];
-                if (!file || !selectedShareholderId) return;
+                if (!file) return;
                 try {
-                  const { taxYear, createdIds, extracted } = await importTax.mutateAsync({
+                  const { taxYear, createdIds, extracted, shareholderId: newShareholderId } = await importTax.mutateAsync({
                     file,
-                    shareholderId: selectedShareholderId,
+                    shareholderId: selectedShareholderId ?? undefined,
                     taxYear: selectedTaxYear,
                     autoCreate: true,
                     postToLedger
@@ -749,6 +748,13 @@ function PersonalIncomeScreen() {
                   // Aligne l'année affichée avec l'année extraite/cible
                   if (Number.isFinite(taxYear)) {
                     setSelectedTaxYear(taxYear);
+                  }
+                  // Si le serveur a créé un actionnaire, sélectionne-le automatiquement
+                  if (!selectedShareholderId && Number.isFinite(newShareholderId as number)) {
+                    const sid = Number(newShareholderId);
+                    setSelectedShareholderId(sid);
+                    setForm((prev) => ({ ...prev, shareholderId: sid }));
+                    notify('Profil personnel créé automatiquement à partir du document.', 'success');
                   }
                   const createdCount = Array.isArray(createdIds) ? createdIds.length : 0;
                   const extractedCount = Array.isArray(extracted) ? extracted.length : 0;
@@ -1504,12 +1510,12 @@ function PersonalIncomeScreen() {
               <Stack spacing={2}>
                 <Typography>Importe un rapport d'impôt ou des feuillets (PDF ou image). Sélectionne l'actionnaire et l'année, puis choisis un fichier.</Typography>
                 {!selectedShareholderId && (
-                  <Alert severity="warning">Sélectionne d'abord un actionnaire en haut de page.</Alert>
+                  <Alert severity="info">Aucun actionnaire présent&nbsp;: l'import créera automatiquement un profil personnel.</Alert>
                 )}
                 <Stack direction="row" spacing={2} alignItems="center">
                   <Button
                     variant="contained"
-                    disabled={!selectedShareholderId || wizardUploading}
+                    disabled={wizardUploading}
                     onClick={() => wizardFileInputRef.current?.click()}
                   >
                     Choisir un fichier…
@@ -1524,17 +1530,23 @@ function PersonalIncomeScreen() {
                   onChange={async (e: ChangeEvent<HTMLInputElement>) => {
                     const file = e.target.files?.[0];
                     e.target.value = '';
-                    if (!file || !selectedShareholderId) return;
+                    if (!file) return;
                     try {
                       setWizardUploading(true);
-                      const { taxYear, createdIds, extracted } = await importTax.mutateAsync({
+                      const { taxYear, createdIds, extracted, shareholderId: newShareholderId } = await importTax.mutateAsync({
                         file,
-                        shareholderId: selectedShareholderId,
+                        shareholderId: selectedShareholderId ?? undefined,
                         taxYear: selectedTaxYear,
                         autoCreate: true,
                         postToLedger
                       });
                       if (Number.isFinite(taxYear)) setSelectedTaxYear(taxYear);
+                      if (!selectedShareholderId && Number.isFinite(newShareholderId as number)) {
+                        const sid = Number(newShareholderId);
+                        setSelectedShareholderId(sid);
+                        setForm((prev) => ({ ...prev, shareholderId: sid }));
+                        notify('Profil personnel créé automatiquement à partir du document.', 'success');
+                      }
                       const createdCount = Array.isArray(createdIds) ? createdIds.length : 0;
                       const extractedCount = Array.isArray(extracted) ? extracted.length : 0;
                       if (createdCount > 0) {
@@ -1611,8 +1623,8 @@ function PersonalIncomeScreen() {
             <Box sx={{ flex: 1 }} />
             <Button onClick={() => setOnboardingOpen(false)}>Fermer</Button>
             {onboardingStep > 0 && <Button onClick={() => setOnboardingStep((s) => Math.max(0, s - 1))}>Précédent</Button>}
-            {onboardingStep < 3 ? (
-              <Button variant="contained" onClick={() => setOnboardingStep((s) => Math.min(3, s + 1))} disabled={onboardingStep === 0 && (wizardUploading || !selectedShareholderId)}>
+              {onboardingStep < 3 ? (
+              <Button variant="contained" onClick={() => setOnboardingStep((s) => Math.min(3, s + 1))} disabled={onboardingStep === 0 && wizardUploading}>
                 Suivant
               </Button>
             ) : (
