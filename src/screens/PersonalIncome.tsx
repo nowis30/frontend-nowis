@@ -1,4 +1,6 @@
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '../components/NotificationProvider';
 import {
   Alert,
@@ -13,6 +15,9 @@ import {
   IconButton,
   MenuItem,
   Paper,
+  Step,
+  StepLabel,
+  Stepper,
   Stack,
   Table,
   TableBody,
@@ -22,6 +27,7 @@ import {
   TextField,
   Typography
 } from '@mui/material';
+import LinearProgress from '@mui/material/LinearProgress';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import EditIcon from '@mui/icons-material/Edit';
@@ -108,6 +114,8 @@ function createInitialForm(shareholderId: number | null, taxYear: number): Perso
 
 function PersonalIncomeScreen() {
   const { notify } = useNotification();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const currentYear = useMemo(() => new Date().getFullYear(), []);
   const [selectedShareholderId, setSelectedShareholderId] = useState<number | null>(null);
   const [selectedTaxYear, setSelectedTaxYear] = useState<number>(currentYear);
@@ -163,6 +171,11 @@ function PersonalIncomeScreen() {
   const updateProfile = useUpdatePersonalProfile();
   // Confirmation avant sauvegarde du profil
   const [confirmProfileOpen, setConfirmProfileOpen] = useState(false);
+  // Onboarding wizard
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const wizardFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [wizardUploading, setWizardUploading] = useState(false);
   // Documents importés (personnel)
   const [showAllDocs, setShowAllDocs] = useState(false);
   const { data: documents } = useDocuments({ domain: 'personal-income', taxYear: showAllDocs ? undefined as any : selectedTaxYear });
@@ -177,6 +190,29 @@ function PersonalIncomeScreen() {
   const { data: graph } = useGraphNodes();
   const { data: graphOutputs } = useGraphOutputs();
   const graphRecalc = useGraphRecalc();
+  const handleRefreshAll = () => {
+    // Lance un recalcul déterministe côté serveur (sans IA) puis invalide les caches clés
+    graphRecalc.mutate(
+      { source: 'Compta', year: selectedTaxYear },
+      {
+        onSettled: () => {
+          // Invalidate data caches so UI reflects latest state derived from existing info
+          queryClient.invalidateQueries({ queryKey: ['personal-profile'] });
+          queryClient.invalidateQueries({ queryKey: ['personal-income-shareholders'] });
+          queryClient.invalidateQueries({ queryKey: ['personal-incomes'] });
+          queryClient.invalidateQueries({ queryKey: ['personal-income-summary'] });
+          queryClient.invalidateQueries({ queryKey: ['personal-tax-return'] });
+          queryClient.invalidateQueries({ queryKey: ['why-personal-income'] });
+          queryClient.invalidateQueries({ queryKey: ['documents'] });
+          queryClient.invalidateQueries({ queryKey: ['rental-tax'] });
+          queryClient.invalidateQueries({ queryKey: ['summary'] });
+          queryClient.invalidateQueries({ queryKey: ['graph-outputs'] });
+          queryClient.invalidateQueries({ queryKey: ['graph-nodes'] });
+          notify('Données rafraîchies à partir des informations existantes.', 'success');
+        }
+      }
+    );
+  };
 
   const openRename = (id: number, current: string) => {
     setRenameDocId(id);
@@ -225,6 +261,20 @@ function PersonalIncomeScreen() {
 
   const diffProfile = useMemo(() => diffProfileEntries(profile, profileForm), [profile, profileForm]);
   const hasProfileChanges = diffProfile.length > 0;
+
+  // Indicateur de complétude du profil (nom/adresse/date/phone)
+  const profileCompleteness = useMemo(() => {
+    const fields = [
+      { key: 'Nom', ok: Boolean(profile?.displayName && profile.displayName.trim().length >= 2) },
+      { key: 'Adresse', ok: Boolean(profile?.address && profile.address.trim().length >= 5) },
+      { key: 'Date de naissance', ok: Boolean(profile?.birthDate && !Number.isNaN(new Date(profile.birthDate).getTime())) },
+      { key: 'Téléphone', ok: Boolean(profile?.contactPhone && String(profile.contactPhone).trim().length >= 7) }
+    ];
+    const done = fields.filter(f => f.ok).length;
+    const missing = fields.filter(f => !f.ok).map(f => f.key);
+    const pct = Math.round((done / fields.length) * 100);
+    return { pct, missing };
+  }, [profile]);
 
   const currencyFormatter = useMemo(
     () =>
@@ -416,6 +466,21 @@ function PersonalIncomeScreen() {
         <Typography variant="h6" gutterBottom>
           Informations personnelles
         </Typography>
+        <Box sx={{ mb: 2 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+            <Box sx={{ flex: 1 }}>
+              <LinearProgress variant="determinate" value={profileCompleteness.pct} sx={{ height: 8, borderRadius: 1 }} />
+            </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ minWidth: 140, textAlign: 'right' }}>
+              Complétude: {profileCompleteness.pct}%
+            </Typography>
+          </Stack>
+          {profileCompleteness.missing.length > 0 && (
+            <Typography variant="caption" color="text.secondary">
+              À compléter: {profileCompleteness.missing.join(', ')}
+            </Typography>
+          )}
+        </Box>
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
             <TextField
@@ -650,6 +715,12 @@ function PersonalIncomeScreen() {
           <Button variant="contained" onClick={handleOpenForm} disabled={!selectedShareholderId}>
             Ajouter un revenu
           </Button>
+          <Button
+            variant="outlined"
+            onClick={() => { setOnboardingOpen(true); setOnboardingStep(0); }}
+          >
+            Démarrer l'onboarding
+          </Button>
           <FormControlLabel
             control={<Switch checked={postToLedger} onChange={(e) => setPostToLedger(e.target.checked)} />}
             label="Publier au grand livre"
@@ -710,6 +781,13 @@ function PersonalIncomeScreen() {
                 }
               }}
             />
+          </Button>
+          <Button
+            variant="text"
+            onClick={handleRefreshAll}
+            disabled={graphRecalc.isPending}
+          >
+            Rafraîchir les données
           </Button>
         </Stack>
       </Stack>
@@ -1408,6 +1486,139 @@ function PersonalIncomeScreen() {
         <DialogActions>
           <Button onClick={closeRename}>Annuler</Button>
           <Button variant="contained" onClick={confirmRename} disabled={updateDocument.isPending}>Enregistrer</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Onboarding guidé */}
+      <Dialog open={onboardingOpen} onClose={() => setOnboardingOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle>Bienvenue — Configurons vos revenus personnels</DialogTitle>
+        <DialogContent dividers>
+          <Stepper activeStep={onboardingStep} alternativeLabel>
+            <Step key={0}><StepLabel>Importer</StepLabel></Step>
+            <Step key={1}><StepLabel>Vérifier le profil</StepLabel></Step>
+            <Step key={2}><StepLabel>Associer les loyers</StepLabel></Step>
+            <Step key={3}><StepLabel>Conseils (optionnel)</StepLabel></Step>
+          </Stepper>
+          <Box sx={{ mt: 3 }}>
+            {onboardingStep === 0 && (
+              <Stack spacing={2}>
+                <Typography>Importe un rapport d'impôt ou des feuillets (PDF ou image). Sélectionne l'actionnaire et l'année, puis choisis un fichier.</Typography>
+                {!selectedShareholderId && (
+                  <Alert severity="warning">Sélectionne d'abord un actionnaire en haut de page.</Alert>
+                )}
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Button
+                    variant="contained"
+                    disabled={!selectedShareholderId || wizardUploading}
+                    onClick={() => wizardFileInputRef.current?.click()}
+                  >
+                    Choisir un fichier…
+                  </Button>
+                  {wizardUploading && <Typography>Import en cours…</Typography>}
+                </Stack>
+                <input
+                  ref={wizardFileInputRef}
+                  type="file"
+                  hidden
+                  accept="application/pdf,image/*"
+                  onChange={async (e: ChangeEvent<HTMLInputElement>) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file || !selectedShareholderId) return;
+                    try {
+                      setWizardUploading(true);
+                      const { taxYear, createdIds, extracted } = await importTax.mutateAsync({
+                        file,
+                        shareholderId: selectedShareholderId,
+                        taxYear: selectedTaxYear,
+                        autoCreate: true,
+                        postToLedger
+                      });
+                      if (Number.isFinite(taxYear)) setSelectedTaxYear(taxYear);
+                      const createdCount = Array.isArray(createdIds) ? createdIds.length : 0;
+                      const extractedCount = Array.isArray(extracted) ? extracted.length : 0;
+                      if (createdCount > 0) {
+                        notify(`Import terminé (${taxYear}). ${createdCount} revenu(x) ajouté(s).`, 'success');
+                      } else if (extractedCount > 0) {
+                        notify(`Import analysé (${taxYear}) mais aucun revenu créé automatiquement.`, 'warning');
+                      } else {
+                        notify('Aucun revenu identifiable dans le document.', 'info');
+                      }
+                      // Recalcule pour propager
+                      graphRecalc.mutate({ source: 'Compta', year: taxYear ?? selectedTaxYear });
+                      // Étape suivante
+                      setOnboardingStep(1);
+                    } catch (err: any) {
+                      const status = err?.response?.status as number | undefined;
+                      const serverMsg = (err?.response?.data?.error as string | undefined) || '';
+                      if (status === 501) {
+                        notify("Import indisponible (clé OpenAI manquante)", 'warning');
+                      } else if (status === 413 || /trop volumineux|too large/i.test(serverMsg)) {
+                        notify('Fichier trop volumineux (max 20 Mo).', 'error');
+                      } else if (/non supporté|unsupported/i.test(serverMsg)) {
+                        notify('Type de fichier non supporté. Utilise un PDF ou une image.', 'error');
+                      } else if (status === 400 && serverMsg) {
+                        notify(serverMsg, 'error');
+                      } else {
+                        notify("Import impossible. Vérifie le fichier.", 'error');
+                      }
+                    } finally {
+                      setWizardUploading(false);
+                    }
+                  }}
+                />
+              </Stack>
+            )}
+            {onboardingStep === 1 && (
+              <Stack spacing={2}>
+                <Typography>Vérifie et complète tes informations personnelles. Le baromètre ci-dessous indique la complétude.</Typography>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                  <Box sx={{ flex: 1 }}>
+                    <LinearProgress variant="determinate" value={profileCompleteness.pct} sx={{ height: 8, borderRadius: 1 }} />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 140, textAlign: 'right' }}>
+                    Complétude: {profileCompleteness.pct}%
+                  </Typography>
+                </Stack>
+                {profileCompleteness.missing.length > 0 && (
+                  <Alert severity="info">À compléter: {profileCompleteness.missing.join(', ')}</Alert>
+                )}
+              </Stack>
+            )}
+            {onboardingStep === 2 && (
+              <Stack spacing={2}>
+                <Typography>
+                  Associe tes feuillets de revenus locatifs (T776/TP‑128) à tes immeubles. Cela permet d'auto‑créer des lignes annuelles de loyers et dépenses par immeuble.
+                </Typography>
+                <Stack direction="row" spacing={2}>
+                  <Button variant="contained" onClick={() => navigate('/rental-tax')}>Aller aux relevés locatifs</Button>
+                  <Button variant="outlined" onClick={handleRefreshAll}>Rafraîchir les données</Button>
+                </Stack>
+              </Stack>
+            )}
+            {onboardingStep === 3 && (
+              <Stack spacing={2}>
+                <Typography>
+                  Découvre des conseils personnalisés (création d'entreprise, levier, gel successoral…). Cette étape est optionnelle.
+                </Typography>
+                <Button variant="contained" onClick={() => navigate('/advisors')}>Ouvrir les conseils</Button>
+              </Stack>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%' }}>
+            <Box sx={{ flex: 1 }} />
+            <Button onClick={() => setOnboardingOpen(false)}>Fermer</Button>
+            {onboardingStep > 0 && <Button onClick={() => setOnboardingStep((s) => Math.max(0, s - 1))}>Précédent</Button>}
+            {onboardingStep < 3 ? (
+              <Button variant="contained" onClick={() => setOnboardingStep((s) => Math.min(3, s + 1))} disabled={onboardingStep === 0 && (wizardUploading || !selectedShareholderId)}>
+                Suivant
+              </Button>
+            ) : (
+              <Button variant="contained" onClick={() => setOnboardingOpen(false)}>Terminer</Button>
+            )}
+          </Stack>
         </DialogActions>
       </Dialog>
 

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -155,6 +156,7 @@ function evaluateWithPreferredEngine(answers: AdvisorAnswer[]) {
 }
 
 export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps = {}) {
+  const navigate = useNavigate();
   const [questions, setQuestions] = useState<AdvisorQuestion[]>([]);
   const [answers, setAnswers] = useState<AdvisorAnswer[]>([]);
   const [result, setResult] = useState<AdvisorResult | null>(null);
@@ -755,6 +757,26 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
     ? questions.find((question) => question.id === currentQuestion.id) ?? currentQuestion
     : null;
 
+  // Helpers: extract simple context from collected answers (best-effort parsing)
+  const getAnswer = useMemo(
+    () => (id: string) => answers.find((a) => a.questionId === id)?.value ?? null,
+    [answers]
+  );
+  const provinceAnswer = getAnswer('province');
+  const taxableIncomeAnswer = getAnswer('taxableIncome');
+  const profitMarginAnswer = getAnswer('profitMargin');
+  const holdingStructureAnswer = getAnswer('holdingStructure');
+  const taxableIncome = useMemo(() => {
+    const n = taxableIncomeAnswer ? Number(String(taxableIncomeAnswer).replace(/[^0-9.-]/g, '')) : NaN;
+    return Number.isFinite(n) ? n : null;
+  }, [taxableIncomeAnswer]);
+  const profitMargin = useMemo(() => {
+    const raw = profitMarginAnswer ? String(profitMarginAnswer) : '';
+    const n = Number(raw.replace('%', '').trim());
+    if (!Number.isFinite(n)) return null;
+    return raw.includes('%') ? n : n > 1 ? n : n * 100; // accept 0.25 => 25%
+  }, [profitMarginAnswer]);
+
   return (
     <Stack spacing={4}>
       <Box>
@@ -1167,6 +1189,203 @@ export default function AdvisorsScreen({ onUnauthorized }: AdvisorsScreenProps =
             <Button variant="outlined" onClick={() => setModeDialogOpen(true)}>
               Changer d’option
             </Button>
+          </Stack>
+        </Stack>
+      </Paper>
+
+      {/* Conseils pédagogiques: explications actionnables et adaptées au contexte */}
+      <Paper elevation={1} sx={{ p: 3 }}>
+        <Stack spacing={2}>
+          <Typography variant="h5">Conseils pédagogiques</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Explications claires, critères déligibilité et prochaines étapes concrètes pour trois thèmes récurrents.
+          </Typography>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="stretch">
+            {/* 1) Création dentreprise */}
+            <Card sx={{ flex: 1, minWidth: 260 }}>
+              <CardContent>
+                <Stack spacing={1.5}>
+                  <Typography variant="h6">Créer une société</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Quand l 19incorporation devient avantageuse et comment s 19y prendre.
+                  </Typography>
+                  <List dense>
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <TipsAndUpdatesIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Critères usuels"
+                        secondary={
+                          taxableIncome !== null
+                            ? `Revenu imposable estimé: ${new Intl.NumberFormat('fr-CA').format(taxableIncome)} $ · Un seuil courant est ~100–150 k$/an (selon province et stabilité).`
+                            : 'Revenu imposable cible > ~100–150 k$/an, revenus stables, besoins de réinvestissement.'
+                        }
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <TipsAndUpdatesIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Points fiscaux"
+                        secondary={
+                          provinceAnswer
+                            ? `Province: ${provinceAnswer}. Taux et règles varient; pensez fractionnement, reports d 19impôt et rémunération salaire/dividendes.`
+                            : 'Taux et règles varient par province; considérez fractionnement, reports d 19impôt et rémunération salaire/dividendes.'
+                        }
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <TaskAltIcon color="success" fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Prérequis pratiques"
+                        secondary={
+                          holdingStructureAnswer
+                            ? `Structure actuelle: ${holdingStructureAnswer}. Vérifiez NEQ/NU, conventions d 19actionnaires, comptes bancaires et tenue de livres.`
+                            : 'NEQ/NU, conventions d 19actionnaires, comptes bancaires et tenue de livres.'
+                        }
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                  </List>
+                  <Stack direction="row" spacing={1}>
+                    <Button variant="contained" onClick={() => navigate('/companies')}>
+                      Ouvrir le module Sociétés
+                    </Button>
+                    <Button variant="outlined" onClick={() => navigate('/corporate/dividends')}>
+                      Dividendes et rémunération
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+
+            {/* 2) Effet de levier */}
+            <Card sx={{ flex: 1, minWidth: 260 }}>
+              <CardContent>
+                <Stack spacing={1.5}>
+                  <Typography variant="h6">Effet de levier</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Quand emprunter pour investir crée de la valeur nette, et où se situe votre seuil d 19équilibre.
+                  </Typography>
+                  <List dense>
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <TipsAndUpdatesIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Règle simple"
+                        secondary="Le levier est intéressant si le rendement attendu net d 19impôt > coût d 19intérêt après impôt."
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                    {typeof profitMargin === 'number' && (
+                      <ListItem disableGutters>
+                        <ListItemIcon sx={{ minWidth: 32 }}>
+                          <TipsAndUpdatesIcon fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary="Tolérance au risque"
+                          secondary={`Votre marge récente: ~${Math.round(profitMargin)} %. Si la marge est faible/volatile, préférez des scénarios prudents (amortissement long, coussin de trésorerie).`}
+                          primaryTypographyProps={{ variant: 'body2' }}
+                          secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                        />
+                      </ListItem>
+                    )}
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <TaskAltIcon color="success" fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Étapes"
+                        secondary="Choisir source (HELOC, immeuble, société), horizon et véhicule d 19investissement; simuler différents taux et vérifier le cashflow."
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                  </List>
+                  <Stack direction="row" spacing={1}>
+                    <Button variant="contained" onClick={() => navigate('/leverage')}>
+                      Simuler un levier
+                    </Button>
+                    <Button variant="outlined" onClick={() => navigate('/leveraged-buyback')}>
+                      Rachat levier (avancé)
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+
+            {/* 3) Gel successoral */}
+            <Card sx={{ flex: 1, minWidth: 260 }}>
+              <CardContent>
+                <Stack spacing={1.5}>
+                  <Typography variant="h6">Gel successoral</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Figer la valeur actuelle, faire croître chez la relève, contrôler les dividendes et l 19impôt.
+                  </Typography>
+                  <List dense>
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <TipsAndUpdatesIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Où vous en êtes"
+                        secondary={
+                          successionCompletionPercent !== null
+                            ? `Progression du dossier: ${successionCompletionPercent} %. ${successionProgressReport?.nextAction.label ?? ''}`.trim()
+                            : 'Démarrez par l 19inventaire des actionnaires, classes d 19actions et actifs.'
+                        }
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                    <ListItem disableGutters>
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <TipsAndUpdatesIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Points techniques"
+                        secondary="Taux de gel, actions privilégiées, convention familiale/fiducie, calendrier de rachats et fiscalité intergénérationnelle."
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                      />
+                    </ListItem>
+                    {successionProgressReport?.latestSimulation && (
+                      <ListItem disableGutters>
+                        <ListItemIcon sx={{ minWidth: 32 }}>
+                          <TaskAltIcon color="success" fontSize="small" />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary="Dernière simulation"
+                          secondary={`Horizon ${successionProgressReport.latestSimulation.inputs.targetFreezeYear} · ${new Date(successionProgressReport.latestSimulation.generatedAt).toLocaleDateString('fr-CA')}`}
+                          primaryTypographyProps={{ variant: 'body2' }}
+                          secondaryTypographyProps={{ variant: 'caption', color: 'text.secondary' }}
+                        />
+                      </ListItem>
+                    )}
+                  </List>
+                  <Stack direction="row" spacing={1}>
+                    <Button variant="contained" onClick={() => navigate('/freeze-simulation')}>
+                      Ouvrir le module Gel
+                    </Button>
+                    <Button variant="outlined" onClick={() => navigate('/family-wealth')}>
+                      Patrimoine familial
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
           </Stack>
         </Stack>
       </Paper>
