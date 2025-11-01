@@ -280,6 +280,7 @@ export interface ImportPersonalTaxResponse {
   taxYear: number;
   extracted: ImportPersonalTaxResultItem[];
   createdIds: number[];
+  rentalStatements?: number[];
   documentId?: number;
   taxReturnId?: number;
   duplicate?: boolean;
@@ -311,8 +312,36 @@ export function useImportPersonalTaxReturn() {
       );
       return data;
     },
-    onSuccess: () => {
+    onSuccess: async (data) => {
+      // Revenus et résumés
       invalidatePersonalIncomeQueries(queryClient);
+      // Profil personnel (peut avoir été mis à jour depuis les métadonnées d'identité du document)
+      queryClient.invalidateQueries({ queryKey: ['personal-profile'] });
+      // Liste des actionnaires (le nom d'affichage peut changer)
+      queryClient.invalidateQueries({ queryKey: ['personal-income-shareholders'] });
+      // Déclarations et feuillets extraits
+      queryClient.invalidateQueries({ queryKey: ['personal-tax-return'] });
+      // Explicabilité dépendante des données importées
+      queryClient.invalidateQueries({ queryKey: ['why-personal-income'] });
+      // Documents (nouvel élément importé + statut d'import)
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+
+      // Déclenche un recalcul du graphe pour propager les changements dans les autres modules (Immeubles, Sommaire, etc.)
+      try {
+        const payload: { source: 'Tax'; year?: number } = { source: 'Tax' } as any;
+        if (typeof data?.taxYear === 'number') (payload as any).year = data.taxYear;
+        await apiClient.post('/graph/recalc', payload);
+      } catch (_err) {
+        // Non bloquant: l'utilisateur peut relancer manuellement le recalcul si nécessaire
+      }
+      // Puis invalide les requêtes qui dépendent du graphe/calculs dérivés
+      queryClient.invalidateQueries({ queryKey: ['summary'] });
+      queryClient.invalidateQueries({ queryKey: ['revenues'] });
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
+      queryClient.invalidateQueries({ queryKey: ['properties', 'options'] });
+      queryClient.invalidateQueries({ queryKey: ['rental-tax', 'statements'] });
+      queryClient.invalidateQueries({ queryKey: ['graph-outputs'] });
     }
   });
 }
