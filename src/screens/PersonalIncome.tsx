@@ -1,4 +1,4 @@
-import { ChangeEvent, MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '../components/NotificationProvider';
@@ -214,10 +214,14 @@ function PersonalIncomeScreen() {
     );
   };
 
-  const blurEventTarget = (event: MouseEvent<HTMLElement>) => {
+  const blurEventTarget = (event: ReactMouseEvent<HTMLElement>) => {
     if (event.currentTarget instanceof HTMLElement) {
       event.currentTarget.blur();
     }
+  };
+
+  const preventDialogTriggerFocus = (event: ReactMouseEvent<HTMLElement>) => {
+    event.preventDefault();
   };
 
   const openRename = (id: number, current: string) => {
@@ -649,6 +653,7 @@ function PersonalIncomeScreen() {
                     </IconButton>
                     <IconButton
                       aria-label="renommer"
+                      onMouseDown={preventDialogTriggerFocus}
                       onClick={(event) => {
                         blurEventTarget(event);
                         openRename(d.id, d.label);
@@ -727,6 +732,7 @@ function PersonalIncomeScreen() {
           />
           <Button
             variant="contained"
+            onMouseDown={preventDialogTriggerFocus}
             onClick={(event) => {
               blurEventTarget(event);
               handleOpenForm();
@@ -737,6 +743,7 @@ function PersonalIncomeScreen() {
           </Button>
           <Button
             variant="outlined"
+            onMouseDown={preventDialogTriggerFocus}
             onClick={(event) => {
               blurEventTarget(event);
               setOnboardingOpen(true);
@@ -752,6 +759,7 @@ function PersonalIncomeScreen() {
           <Button
             variant="outlined"
             component="label"
+            onMouseDown={preventDialogTriggerFocus}
             onClick={(event) => blurEventTarget(event)}
           >
             Importer un rapport d'impôt
@@ -814,6 +822,7 @@ function PersonalIncomeScreen() {
             />
           </Button>
           <Button
+              onMouseDown={preventDialogTriggerFocus}
             variant="text"
             onClick={handleRefreshAll}
             disabled={graphRecalc.isPending}
@@ -876,6 +885,7 @@ function PersonalIncomeScreen() {
               <Button
                 size="small"
                 variant="text"
+                onMouseDown={preventDialogTriggerFocus}
                 onClick={(event) => {
                   blurEventTarget(event);
                   setWhyOpen(true);
@@ -1103,18 +1113,15 @@ function PersonalIncomeScreen() {
                         <Stack direction="row" spacing={2} alignItems="center">
                           <Typography variant="body2" color="text.secondary">Émetteur: {s.issuer || '—'}</Typography>
                           <Typography variant="body2" color="text.secondary">Compte: {s.accountNumber || '—'}</Typography>
-                          <IconButton aria-label="modifier feuillet" size="small" onClick={() => {
-                            setEditingSlipId(s.id);
-                            setSlipForm({ slipType: s.slipType, issuer: s.issuer || '', accountNumber: s.accountNumber || '' });
-                          }}>
+                          <IconButton
+                            aria-label="modifier feuillet"
+                            size="small"
+                            onClick={() => {
+                              setEditingSlipId(s.id);
+                              setSlipForm({ slipType: s.slipType, issuer: s.issuer || '', accountNumber: s.accountNumber || '' });
+                            }}
+                          >
                             <EditIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton aria-label="supprimer feuillet" size="small" onClick={() => {
-                            const ok = window.confirm(`Supprimer le feuillet ${s.slipType} ?`);
-                            if (!ok) return;
-                            slipsMut.remove.mutate({ slipId: s.id });
-                          }}>
-                            <DeleteIcon fontSize="small" />
                           </IconButton>
                           <Button size="small" variant="outlined" onClick={() => {
                             slipLinesMut.create.mutate({ slipId: s.id, payload: { label: 'Nouvelle ligne', amount: 0 } });
