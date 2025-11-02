@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '../components/NotificationProvider';
@@ -212,6 +212,12 @@ function PersonalIncomeScreen() {
         }
       }
     );
+  };
+
+  const blurEventTarget = (event: MouseEvent<HTMLElement>) => {
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.blur();
+    }
   };
 
   const openRename = (id: number, current: string) => {
@@ -539,7 +545,8 @@ function PersonalIncomeScreen() {
           <Grid item xs={12} md="auto">
             <Button
               variant="contained"
-              onClick={() => {
+              onClick={(event) => {
+                blurEventTarget(event);
                 if (hasProfileChanges) setConfirmProfileOpen(true);
                 else notify('Aucun changement à enregistrer.', 'info');
               }}
@@ -640,7 +647,13 @@ function PersonalIncomeScreen() {
                     }}>
                       <ReplayIcon />
                     </IconButton>
-                    <IconButton aria-label="renommer" onClick={() => openRename(d.id, d.label)}>
+                    <IconButton
+                      aria-label="renommer"
+                      onClick={(event) => {
+                        blurEventTarget(event);
+                        openRename(d.id, d.label);
+                      }}
+                    >
                       <EditIcon />
                     </IconButton>
                     <IconButton aria-label="supprimer" onClick={() => {
@@ -712,12 +725,23 @@ function PersonalIncomeScreen() {
             sx={{ width: 140 }}
             inputProps={{ min: 2000, max: currentYear + 1 }}
           />
-          <Button variant="contained" onClick={handleOpenForm} disabled={!selectedShareholderId}>
+          <Button
+            variant="contained"
+            onClick={(event) => {
+              blurEventTarget(event);
+              handleOpenForm();
+            }}
+            disabled={!selectedShareholderId}
+          >
             Ajouter un revenu
           </Button>
           <Button
             variant="outlined"
-            onClick={() => { setOnboardingOpen(true); setOnboardingStep(0); }}
+            onClick={(event) => {
+              blurEventTarget(event);
+              setOnboardingOpen(true);
+              setOnboardingStep(0);
+            }}
           >
             Démarrer l'onboarding
           </Button>
@@ -728,6 +752,7 @@ function PersonalIncomeScreen() {
           <Button
             variant="outlined"
             component="label"
+            onClick={(event) => blurEventTarget(event)}
           >
             Importer un rapport d'impôt
             <input
@@ -848,7 +873,15 @@ function PersonalIncomeScreen() {
           <Paper sx={{ p: 3, height: '100%' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
               <Typography variant="h6">Résumé par catégorie</Typography>
-              <Button size="small" variant="text" onClick={() => setWhyOpen(true)} disabled={!selectedShareholderId}>
+              <Button
+                size="small"
+                variant="text"
+                onClick={(event) => {
+                  blurEventTarget(event);
+                  setWhyOpen(true);
+                }}
+                disabled={!selectedShareholderId}
+              >
                 Pourquoi ce total ?
               </Button>
             </Stack>
