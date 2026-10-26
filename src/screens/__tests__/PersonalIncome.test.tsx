@@ -1,8 +1,22 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, vi, beforeEach, afterEach, expect } from 'vitest';
-import type { ReactNode } from 'react';
-import { MemoryRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type {
+  ButtonHTMLAttributes,
+  ChangeEventHandler,
+  HTMLAttributes,
+  HTMLInputTypeAttribute,
+  OptionHTMLAttributes,
+  ReactNode
+} from 'react';
+
+type MockTextFieldProps = Omit<HTMLAttributes<HTMLElement>, 'onChange'> & {
+  label?: string;
+  value?: string | number | readonly string[];
+  onChange?: ChangeEventHandler<HTMLInputElement | HTMLSelectElement>;
+  type?: HTMLInputTypeAttribute;
+  multiline?: boolean;
+  minRows?: number;
+  select?: boolean;
+};
 
 // Import paresseux du composant testé pour éviter d'échouer au chargement si les mocks ne sont pas encore appliqués
 
@@ -66,28 +80,38 @@ vi.mock('../../api/personalReturns', () => ({
 // Mock MUI pour alléger fortement le rendu et éviter les OOM sous Windows/Node 22
 vi.mock('@mui/material', async () => {
   const React = await import('react');
-  const passthrough = (tag: keyof JSX.IntrinsicElements = 'div') =>
-    React.forwardRef<any, any>((props, ref) => React.createElement(tag, { ref, ...props }, props.children));
+  const passthrough = (tag: 'div' | 'h2' | 'span' | 'hr' = 'div') => {
+    const MockComponent = React.forwardRef<HTMLElement, HTMLAttributes<HTMLElement>>(
+      (props, ref) => React.createElement(tag, { ref, ...props }, props.children)
+    );
+    MockComponent.displayName = `Mock${tag}`;
+    return MockComponent;
+  };
 
-  const Button = ({ children, onClick, disabled, ...rest }: any) => (
+  const Button = ({ children, onClick, disabled, ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button onClick={onClick} disabled={disabled} {...rest}>{children}</button>
   );
-  const TextField = ({ label, value, onChange, type = 'text', multiline, minRows, select, children, ...rest }: any) => (
-    <label>
-      {label}
-      {select ? (
-        <select aria-label={label} value={value ?? ''} onChange={onChange} {...rest}>
-          {children}
-        </select>
-      ) : (
-        <input aria-label={label} type={type} value={value ?? ''} onChange={onChange} {...rest} />
-      )}
-    </label>
-  );
-  const MenuItem = ({ value, children, ...rest }: any) => (
+  const TextField = ({ label, value, onChange, type = 'text', select, children, ...rest }: MockTextFieldProps) => {
+    // These MUI-only props were already omitted from the DOM by this mock.
+    delete rest.multiline;
+    delete rest.minRows;
+    return (
+      <label>
+        {label}
+        {select ? (
+          <select aria-label={label} value={value ?? ''} onChange={onChange} {...rest}>
+            {children}
+          </select>
+        ) : (
+          <input aria-label={label} type={type} value={value ?? ''} onChange={onChange} {...rest} />
+        )}
+      </label>
+    );
+  };
+  const MenuItem = ({ value, children, ...rest }: OptionHTMLAttributes<HTMLOptionElement>) => (
     <option value={value} {...rest}>{children}</option>
   );
-  const Dialog = ({ open, children }: any) => (open ? <div role="dialog">{children}</div> : null);
+  const Dialog = ({ open, children }: { open?: boolean; children?: ReactNode }) => (open ? <div role="dialog">{children}</div> : null);
   const DialogTitle = passthrough('h2');
   const DialogContent = passthrough('div');
   const DialogActions = passthrough('div');
@@ -133,22 +157,6 @@ vi.mock('@mui/icons-material/Edit', () => ({ default: () => null }));
 vi.mock('@mui/icons-material/Delete', () => ({ default: () => null }));
 vi.mock('@mui/icons-material/Launch', () => ({ default: () => null }));
 vi.mock('@mui/icons-material/Replay', () => ({ default: () => null }));
-
-const routerFutureConfig = {
-  v7_startTransition: true,
-  v7_relativeSplatPath: true
-} as const;
-
-function renderWithProviders(ui: ReactNode) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } }
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter future={routerFutureConfig}>{ui}</MemoryRouter>
-    </QueryClientProvider>
-  );
-}
 
 describe('PersonalIncomeScreen - confirmation mise à jour profil', () => {
   beforeEach(() => {

@@ -328,10 +328,10 @@ export function useImportPersonalTaxReturn() {
 
       // Déclenche un recalcul du graphe pour propager les changements dans les autres modules (Immeubles, Sommaire, etc.)
       try {
-        const payload: { source: 'Tax'; year?: number } = { source: 'Tax' } as any;
-        if (typeof data?.taxYear === 'number') (payload as any).year = data.taxYear;
+        const payload: { source: 'Tax'; year?: number } = { source: 'Tax' };
+        if (typeof data?.taxYear === 'number') payload.year = data.taxYear;
         await apiClient.post('/graph/recalc', payload);
-      } catch (_err) {
+      } catch {
         // Non bloquant: l'utilisateur peut relancer manuellement le recalcul si nécessaire
       }
       // Puis invalide les requêtes qui dépendent du graphe/calculs dérivés

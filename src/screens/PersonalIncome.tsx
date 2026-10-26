@@ -1,6 +1,7 @@
 import { ChangeEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { useNotification } from '../components/NotificationProvider';
 import {
   Alert,
@@ -54,7 +55,7 @@ import {
 import { useGraphNodes, useGraphRecalc, useRecentEvents, useGraphOutputs } from '../api/diagnostics';
 import { useComputePersonalTaxReturn } from '../api/tax';
 import { buildDocumentDownloadUrl, reingestDocument, useDeleteDocument, useDocuments, useUpdateDocument } from '../api/documents';
-import { useMutateReturnLines, useMutateSlipLines, useMutateSlips } from '../api/personalReturns';
+import { useMutateSlipLines, useMutateSlips } from '../api/personalReturns';
 import { diffProfileEntries } from './personalIncomeDiff';
 
 interface PersonalIncomeFormState {
@@ -68,6 +69,7 @@ interface PersonalIncomeFormState {
 }
 
 type PersonalIncomeFieldError = Partial<Record<keyof PersonalIncomeFormState, string>>;
+type ApiErrorPayload = { error?: string };
 
 const parseLocaleNumber = (raw: string): number => {
   const normalized = raw
@@ -178,7 +180,7 @@ function PersonalIncomeScreen() {
   const [wizardUploading, setWizardUploading] = useState(false);
   // Documents importés (personnel)
   const [showAllDocs, setShowAllDocs] = useState(false);
-  const { data: documents } = useDocuments({ domain: 'personal-income', taxYear: showAllDocs ? undefined as any : selectedTaxYear });
+  const { data: documents } = useDocuments({ domain: 'personal-income', taxYear: showAllDocs ? undefined : selectedTaxYear });
   const updateDocument = useUpdateDocument();
   const deleteDocument = useDeleteDocument();
   const [renameDocId, setRenameDocId] = useState<number | null>(null);
@@ -413,8 +415,8 @@ function PersonalIncomeScreen() {
         // Recalcule les computes dépendants pour répercuter la suppression
         graphRecalc.mutate({ source: 'Compta', year: selectedTaxYear });
       },
-      onError: (err: any) => {
-        const msg = err?.response?.data?.error as string | undefined;
+      onError: (err) => {
+        const msg = isAxiosError<ApiErrorPayload>(err) ? err.response?.data?.error : undefined;
         if (msg) {
           notify(`Suppression impossible: ${msg}`, 'error');
         } else {
@@ -429,7 +431,6 @@ function PersonalIncomeScreen() {
   // --- Mutations pour édition des feuillets et lignes ---
   const slipsMut = useMutateSlips();
   const slipLinesMut = useMutateSlipLines();
-  const returnLinesMut = useMutateReturnLines();
 
   // États d'édition pour feuillet et lignes de feuillet
   const [editingSlipId, setEditingSlipId] = useState<number | null>(null);
@@ -509,7 +510,7 @@ function PersonalIncomeScreen() {
               label="Sexe"
               value={profileForm.gender || ''}
               onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                setProfileForm((p) => ({ ...p, gender: (e.target.value as any) || '' }))
+                setProfileForm((p) => ({ ...p, gender: (e.target.value as typeof profileForm.gender) || '' }))
               }
             >
               <MenuItem value="">—</MenuItem>
@@ -637,9 +638,10 @@ function PersonalIncomeScreen() {
                         } else {
                           notify('Ré-ingestion terminée: aucun revenu détecté.', 'info');
                         }
-                      } catch (err: any) {
-                        const status = err?.response?.status as number | undefined;
-                        const serverMsg = (err?.response?.data?.error as string | undefined) || '';
+                      } catch (err) {
+                        const response = isAxiosError<ApiErrorPayload>(err) ? err.response : undefined;
+                        const status = response?.status;
+                        const serverMsg = response?.data?.error || '';
                         if (status === 410) {
                           notify("Ce document n'est plus disponible côté serveur (stockage éphémère). Ré-uploade le fichier puis ré-essaie.", 'warning');
                         } else if (serverMsg) {
@@ -800,10 +802,11 @@ function PersonalIncomeScreen() {
                   }
                   // Déclenche un recalcul global depuis la compta pour propager les écritures postées
                   graphRecalc.mutate({ source: 'Compta', year: taxYear ?? selectedTaxYear });
-                } catch (err: any) {
+                } catch (err) {
                   // Afficher des messages plus précis côté UI
-                  const status = err?.response?.status as number | undefined;
-                  const serverMsg = (err?.response?.data?.error as string | undefined) || '';
+                  const response = isAxiosError<ApiErrorPayload>(err) ? err.response : undefined;
+                  const status = response?.status;
+                  const serverMsg = response?.data?.error || '';
                   if (status === 501) {
                     notify("Import indisponible pour le moment: le serveur n'est pas configuré pour l'extraction (clé OpenAI manquante).", 'warning');
                   } else if (status === 413 || /trop volumineux|too large/i.test(serverMsg)) {
@@ -1356,7 +1359,7 @@ function PersonalIncomeScreen() {
                       <TableCell>{ev.type}</TableCell>
                       <TableCell>
                         <Typography variant="caption" color="text.secondary">
-                          {Object.keys(ev).filter(k => !['type','at'].includes(k)).slice(0,3).map(k => `${k}: ${String((ev as any)[k])}`).join(' · ') || '—'}
+                          {Object.keys(ev).filter(k => !['type','at'].includes(k)).slice(0,3).map(k => `${k}: ${String(ev[k])}`).join(' · ') || '—'}
                         </Typography>
                       </TableCell>
                     </TableRow>
@@ -1600,9 +1603,10 @@ function PersonalIncomeScreen() {
                       graphRecalc.mutate({ source: 'Compta', year: taxYear ?? selectedTaxYear });
                       // Étape suivante
                       setOnboardingStep(1);
-                    } catch (err: any) {
-                      const status = err?.response?.status as number | undefined;
-                      const serverMsg = (err?.response?.data?.error as string | undefined) || '';
+                    } catch (err) {
+                      const response = isAxiosError<ApiErrorPayload>(err) ? err.response : undefined;
+                      const status = response?.status;
+                      const serverMsg = response?.data?.error || '';
                       if (status === 501) {
                         notify("Import indisponible (clé OpenAI manquante)", 'warning');
                       } else if (status === 413 || /trop volumineux|too large/i.test(serverMsg)) {
@@ -1713,7 +1717,7 @@ function PersonalIncomeScreen() {
               setConfirmProfileOpen(false);
               updateProfile.mutate({
                 displayName: profileForm.displayName || undefined,
-                gender: (profileForm.gender || undefined) as any,
+                gender: profileForm.gender || undefined,
                 birthDate: profileForm.birthDate || undefined,
                 address: profileForm.address || null
               }, { onSuccess: () => notify('Profil mis à jour.', 'success') });
