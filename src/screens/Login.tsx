@@ -7,6 +7,8 @@ import { apiClient } from '../api/client';
 import { useAuthStore, type AuthState } from '../store/authStore';
 import { useNotification } from '../components/NotificationProvider';
 
+const publicSignupEnabled = import.meta.env.VITE_ALLOW_PUBLIC_REGISTRATION === 'true';
+
 function LoginScreen() {
   const navigate = useNavigate();
   const setToken = useAuthStore((state: AuthState) => state.setToken);
@@ -139,7 +141,7 @@ function LoginScreen() {
           >
             {submitLabel}
           </Button>
-          <Button
+          {publicSignupEnabled && <Button
             type="button"
             variant="text"
             color="secondary"
@@ -150,7 +152,7 @@ function LoginScreen() {
             }}
           >
             {toggleLabel}
-          </Button>
+          </Button>}
         </Stack>
       </Paper>
     </Box>

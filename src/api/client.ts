@@ -1,38 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios';
 
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, isUsableToken } from '../store/authStore';
+import { resolveApiBaseUrl } from './baseUrl';
 import { getAdvisorPortalKey } from '../utils/advisorPortalKey';
 
-// Détermine la base API : priorité à l'env, sinon Render en prod, sinon proxy local.
-const envBaseUrl =
-  (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.URL_API_VITE || '';
-
-// On Vercel on s'appuie sur le rewrite /api -> backend Render, sinon on retombe sur Render.
-const resolvedBaseUrl = (() => {
-  if (typeof window !== 'undefined') {
-    const { hostname } = window.location;
-    // Sur Vercel, on force l'utilisation de l'URL relative 
-    // pour profiter du rewrite `/api` défini dans vercel.json.
-    if (hostname.endsWith('.vercel.app')) {
-      return '';
-    }
-    // En local (vite dev server), on utilise aussi le proxy `/api`.
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return '';
-    }
-  }
-
-  // Hors Vercel et hors local, on laisse une porte de sortie via env,
-  // sinon fallback Render.
-  if (envBaseUrl) {
-    return envBaseUrl.replace(/\/$/, '');
-  }
-  return 'https://backend-nowis-1.onrender.com';
-})();
-
+const configuredBase = import.meta.env.VITE_API_URL || import.meta.env.URL_API_VITE;
 export const apiClient = axios.create({
-  baseURL: resolvedBaseUrl ? `${resolvedBaseUrl}/api` : '/api'
+  baseURL: resolveApiBaseUrl(configuredBase, typeof window === 'undefined' ? 'localhost' : window.location.hostname)
 });
 
 function isAdvisorPortalRoute(): boolean {
@@ -44,7 +19,11 @@ function isAdvisorPortalRoute(): boolean {
 
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const headers = AxiosHeaders.from(config.headers ?? {});
-  const token = useAuthStore.getState().token;
+  let token = useAuthStore.getState().token;
+  if (token && !isUsableToken(token)) {
+    useAuthStore.getState().setToken(null);
+    token = null;
+  }
 
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
@@ -57,4 +36,13 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
   config.headers = headers;
   return config;
+});
+
+apiClient.interceptors.response.use(response => response, error => {
+  const currentToken = useAuthStore.getState().token;
+  const sentAuthorization = AxiosHeaders.from(error.config?.headers ?? {}).get('Authorization');
+  if (error.response?.status === 401 && currentToken && sentAuthorization === `Bearer ${currentToken}`) {
+    useAuthStore.getState().setToken(null);
+  }
+  return Promise.reject(error);
 });
