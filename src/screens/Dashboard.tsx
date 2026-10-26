@@ -33,6 +33,12 @@ import ProfileProjectionCard from '../components/ProfileProjectionCard';
 import { useProfileInsights } from '../api/profileInsights';
 import { useAvailableReturnYears, usePersonalReturn } from '../api/personalReturns';
 
+type ExportPayload = BlobPart | null | undefined;
+
+function hasExportData(response: ExportPayload | { data: ExportPayload }): response is { data: ExportPayload } {
+  return Boolean(response && Object.prototype.hasOwnProperty.call(response, 'data'));
+}
+
 function DashboardScreen() {
   const { data, isLoading } = useSummary();
   const personal = data?.personal ?? undefined;
@@ -170,11 +176,11 @@ function DashboardScreen() {
   const handleExportCsv = async () => {
     try {
       setExportingCsv(true);
-      const response = await apiClient.get('/summary/export/csv', { responseType: 'blob' });
+      const response = await apiClient.get<ExportPayload>('/summary/export/csv', { responseType: 'blob' });
       const date = new Date().toISOString().split('T')[0];
-      const maybeData = response && (Object.prototype.hasOwnProperty.call(response, 'data') ? (response as any).data : response);
+      const maybeData = hasExportData(response) ? response.data : response;
       const blob = maybeData instanceof Blob ? maybeData : new Blob([maybeData ?? ''], { type: 'text/csv;charset=utf-8;' });
-      downloadBlob(blob as Blob, `bilan-nowis-${date}.csv`);
+      downloadBlob(blob, `bilan-nowis-${date}.csv`);
     } catch (error) {
       console.error('Erreur export CSV', error);
     } finally {
@@ -185,11 +191,11 @@ function DashboardScreen() {
   const handleExportPdf = async () => {
     try {
       setExportingPdf(true);
-      const response = await apiClient.get('/summary/export/pdf', { responseType: 'blob' });
-      const maybeData = response && (Object.prototype.hasOwnProperty.call(response, 'data') ? (response as any).data : response);
+      const response = await apiClient.get<ExportPayload>('/summary/export/pdf', { responseType: 'blob' });
+      const maybeData = hasExportData(response) ? response.data : response;
       const blob = maybeData instanceof Blob ? maybeData : new Blob([maybeData ?? ''], { type: 'application/pdf' });
       const date = new Date().toISOString().split('T')[0];
-      downloadBlob(blob as Blob, `bilan-nowis-${date}.pdf`);
+      downloadBlob(blob, `bilan-nowis-${date}.pdf`);
     } catch (error) {
       console.error('Erreur export PDF', error);
     } finally {

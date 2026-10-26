@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from './client';
 
+export interface DocumentMetadata extends Record<string, unknown> {
+  import?: (Record<string, unknown> & { status?: string; taxYear?: number }) | null;
+}
+
 export interface DocumentDto {
   id: number;
   domain: string;
@@ -13,7 +17,7 @@ export interface DocumentDto {
   checksum: string | null;
   taxYear: number | null;
   shareholderId: number | null;
-  metadata?: any | null;
+  metadata?: DocumentMetadata | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -64,7 +68,7 @@ export function buildDocumentDownloadUrl(id: number): string {
 export interface ReingestResult {
   shareholderId?: number | null;
   taxYear?: number;
-  extracted?: any[];
+  extracted?: unknown[];
   createdIds?: number[];
   rentalStatements?: number[];
   documentId: number;

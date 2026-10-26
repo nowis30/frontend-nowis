@@ -85,7 +85,7 @@ export function useCreateReturnLine(returnId: number | undefined) {
       const { data } = await apiClient.post<{ id: number }>(`/personal-incomes/returns/${returnId}/lines`, payload);
       return data;
     },
-    onSuccess: (_data, _vars, _ctx) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['personal-returns'] });
     }
   });
